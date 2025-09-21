@@ -93,10 +93,22 @@ function M.search_with_ripgrep(query, callback)
         end,
         on_stderr = function(_, data)
             if data and #data > 0 then
-                local error_msg = table.concat(data, '\n')
-                vim.notify('Ripgrep stderr: ' .. error_msg, vim.log.levels.ERROR)
-                -- Fallback to vim search if ripgrep fails
-                M.search_with_vim(query, callback)
+                -- Filter out empty strings and join
+                local filtered_data = {}
+                for _, line in ipairs(data) do
+                    if line and line ~= '' then
+                        table.insert(filtered_data, line)
+                    end
+                end
+                
+                if #filtered_data > 0 then
+                    local error_msg = table.concat(filtered_data, '\n')
+                    vim.notify('Ripgrep error: ' .. error_msg, vim.log.levels.ERROR)
+                    vim.notify('Command: ' .. table.concat(cmd, ' '), vim.log.levels.ERROR)
+                    
+                    -- Fallback to vim search if ripgrep fails
+                    M.search_with_vim(query, callback)
+                end
             end
         end,
         on_exit = function(_, code)
@@ -178,10 +190,26 @@ function M.search_with_vim(query, callback)
     local files = vim.fn.systemlist('find . -type f')
 
     for _, file in ipairs(files) do
-        -- Skip ignored patterns
+        -- Skip ignored patterns (convert glob patterns to lua patterns for matching)
         local should_ignore = false
         for _, pattern in ipairs(opts.ignore_patterns) do
-            if file:match(pattern) then
+            -- Convert simple glob patterns to lua patterns
+            local lua_pattern = pattern
+            if pattern:match('%*') then
+                -- Convert *.ext to %.ext$ 
+                lua_pattern = pattern:gsub('%*', '.*'):gsub('%.', '%%.')
+                if not lua_pattern:match('%$$') then
+                    lua_pattern = lua_pattern .. '$'
+                end
+            elseif pattern:match('/$') then
+                -- Directory patterns like .git/
+                lua_pattern = pattern:gsub('%.', '%%.')
+            else
+                -- Exact matches like .DS_Store
+                lua_pattern = pattern:gsub('%.', '%%.')
+            end
+            
+            if file:match(lua_pattern) then
                 should_ignore = true
                 break
             end

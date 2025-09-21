@@ -10,14 +10,14 @@ M.defaults = {
     ignore_case = true,
     max_results = 100, -- Reduced for better performance
 
-    -- File patterns to ignore
+    -- File patterns to ignore (using glob syntax for ripgrep)
     ignore_patterns = {
-        '%.git/',
+        '.git/',
         'node_modules/',
-        '%.DS_Store',
-        '%.pyc$',
-        '%.o$',
-        '%.class$',
+        '.DS_Store',
+        '*.pyc',
+        '*.o',
+        '*.class',
     },
 
     -- Highlight groups
