@@ -218,10 +218,19 @@ function M.setup_buffer_keymaps(bufnr)
         silent = true
     })
 
-    -- Start search mode with 'i' or any printable character
+    -- Special handling for 'i' to enter insert mode properly
+    vim.api.nvim_buf_set_keymap(bufnr, 'n', 'i', '', {
+        callback = function()
+            M.start_search()
+        end,
+        noremap = true,
+        silent = true
+    })
+
+    -- Start search mode with other printable characters (but not 'i')
     local function setup_char_maps()
-        -- All printable characters
-        local chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?`~'
+        -- All printable characters except 'i'
+        local chars = 'abcdefghjklmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?`~'
         for i = 1, #chars do
             local char = chars:sub(i, i)
             vim.api.nvim_buf_set_keymap(bufnr, 'n', char, '', {
@@ -365,9 +374,10 @@ function M.start_search()
     -- Focus the sidebar window
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         vim.api.nvim_set_current_win(state.winnr)
-        -- Position cursor
+        -- Position cursor and enter insert mode
         local cursor_col = #state.search_query + 2
         vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+        vim.cmd('startinsert')
     end
 end
 
