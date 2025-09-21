@@ -171,15 +171,10 @@ function M.setup_buffer_keymaps(bufnr)
     local opts = { noremap = true, silent = true, buffer = bufnr }
     local keymaps = config.options.keymaps
 
-    -- Clear all existing keymaps first
+    -- 'q' always quits
     vim.api.nvim_buf_set_keymap(bufnr, 'n', 'q', '', {
         callback = function()
-            if state.search_mode then
-                -- In search mode, q just adds 'q' to search, only double-q exits
-                M.handle_char_input('q')
-            else
-                require('yas').close()
-            end
+            require('yas').close()
         end,
         noremap = true,
         silent = true
@@ -227,10 +222,10 @@ function M.setup_buffer_keymaps(bufnr)
         silent = true
     })
 
-    -- Start search mode with other printable characters (but not 'i')
+    -- Start search mode with other printable characters (but not 'i' or 'q')
     local function setup_char_maps()
-        -- All printable characters except 'i'
-        local chars = 'abcdefghjklmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?`~'
+        -- All printable characters except 'i' and 'q'
+        local chars = 'abcdefghjklmnoprstuvwxyzABCDEFGHJKLMNOPRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?`~'
         for i = 1, #chars do
             local char = chars:sub(i, i)
             vim.api.nvim_buf_set_keymap(bufnr, 'n', char, '', {
@@ -410,8 +405,11 @@ end
 function M.perform_search_and_update()
     -- Cancel previous timer if it exists
     if state.search_timer then
-        state.search_timer:stop()
-        state.search_timer:close()
+        if not state.search_timer:is_closing() then
+            state.search_timer:stop()
+            state.search_timer:close()
+        end
+        state.search_timer = nil
     end
 
     if state.search_query == '' then
@@ -446,7 +444,7 @@ function M.perform_search_and_update()
             M.render_content()
         end
 
-        if state.search_timer then
+        if state.search_timer and not state.search_timer:is_closing() then
             state.search_timer:close()
             state.search_timer = nil
         end
