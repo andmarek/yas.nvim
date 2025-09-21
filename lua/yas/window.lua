@@ -21,10 +21,10 @@ function M.create()
         state.bufnr = vim.api.nvim_create_buf(false, true)
 
         -- Set buffer options
-        vim.api.nvim_buf_set_option(state.bufnr, 'buftype', 'nofile')
-        vim.api.nvim_buf_set_option(state.bufnr, 'swapfile', false)
-        vim.api.nvim_buf_set_option(state.bufnr, 'bufhidden', 'wipe')
-        vim.api.nvim_buf_set_option(state.bufnr, 'filetype', 'yas-finder')
+        vim.api.nvim_set_option_value('buftype', 'nofile', { buf = state.bufnr })
+        vim.api.nvim_set_option_value('swapfile', false, { buf = state.bufnr })
+        vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = state.bufnr })
+        vim.api.nvim_set_option_value('filetype', 'yas-finder', { buf = state.bufnr })
         vim.api.nvim_buf_set_name(state.bufnr, 'YAS Finder')
 
         -- Set up insert mode autocmds for seamless search experience
@@ -67,9 +67,13 @@ function M.create()
     vim.api.nvim_set_current_win(state.winnr)
     
     -- Position cursor at end of search text and enter insert mode
-    local cursor_col = #state.search_query + 2
-    vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
-    vim.cmd('startinsert')
+    vim.schedule(function()
+        if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+            local cursor_col = #state.search_query + 2  -- Account for "│ " prefix
+            vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+            vim.cmd('startinsert')
+        end
+    end)
 end
 
 -- Close the window
@@ -133,6 +137,7 @@ function M.setup_insert_mode_keymaps(bufnr)
                     M.render_content()
                     M.perform_search_and_update()
                 end
+                return false -- Allow vim to handle the actual insertion
             end,
             noremap = true,
             silent = true
@@ -147,6 +152,7 @@ function M.setup_insert_mode_keymaps(bufnr)
                 M.render_content()
                 M.perform_search_and_update()
             end
+            return false -- Allow vim to handle the actual insertion
         end,
         noremap = true,
         silent = true
@@ -160,6 +166,7 @@ function M.setup_insert_mode_keymaps(bufnr)
                 M.render_content()
                 M.perform_search_and_update()
             end
+            return false -- Allow vim to handle the actual deletion
         end,
         noremap = true,
         silent = true
@@ -349,15 +356,19 @@ function M.render_content()
         end
     end
 
-    vim.api.nvim_buf_set_option(state.bufnr, 'modifiable', true)
+    vim.api.nvim_set_option_value('modifiable', true, { buf = state.bufnr })
     vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, lines)
-    vim.api.nvim_buf_set_option(state.bufnr, 'modifiable', false)
+    vim.api.nvim_set_option_value('modifiable', false, { buf = state.bufnr })
 
-    -- Position cursor on search line when in search mode
+    -- Position cursor on search line when in search mode (use vim.schedule to avoid timing issues)
     if state.search_mode and state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-        -- Position cursor at the end of the search query (after the text, accounting for "│ " prefix)
-        local cursor_col = #state.search_query + 2 -- 2 for "│ " prefix
-        vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+        vim.schedule(function()
+            if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+                -- Position cursor at the end of the search query (after the text, accounting for "│ " prefix)
+                local cursor_col = #state.search_query + 2 -- 2 for "│ " prefix
+                vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+            end
+        end)
     end
 end
 
@@ -370,9 +381,13 @@ function M.start_search()
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         vim.api.nvim_set_current_win(state.winnr)
         -- Position cursor and enter insert mode
-        local cursor_col = #state.search_query + 2
-        vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
-        vim.cmd('startinsert')
+        vim.schedule(function()
+            if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+                local cursor_col = #state.search_query + 2
+                vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+                vim.cmd('startinsert')
+            end
+        end)
     end
 end
 

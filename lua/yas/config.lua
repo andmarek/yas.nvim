@@ -4,13 +4,12 @@ local M = {}
 M.defaults = {
     -- Window settings
     width = 40,
-    position = 'left', -- 'left', 'right'
+    position = 'left',
 
     -- Search settings
     ignore_case = true,
-    max_results = 100, -- Reduced for better performance
+    max_results = 100,
 
-    -- File patterns to ignore (using glob syntax for ripgrep)
     ignore_patterns = {
         '.git/',
         'node_modules/',
@@ -44,7 +43,6 @@ function M.setup(opts)
     M.options = vim.tbl_deep_extend('force', M.defaults, opts)
 end
 
--- Initialize with defaults if not set up
 M.setup({})
 
 return M

@@ -22,15 +22,8 @@ function M.perform_search(query, callback)
     local opts = config.options
     local results = {}
 
-    -- Use ripgrep if available, otherwise fall back to vim.fn.glob + vim.fn.readfile
-    local has_rg = vim.fn.executable('rg') == 1
-
     local search_ok, search_err = pcall(function()
-        if has_rg then
-            M.search_with_ripgrep(query, callback)
-        else
-            M.search_with_vim(query, callback)
-        end
+        M.search_with_ripgrep(query, callback)
     end)
 
     if not search_ok then
@@ -39,7 +32,7 @@ function M.perform_search(query, callback)
     end
 end
 
--- Search using ripgrep (faster)
+-- Search using ripgrep
 function M.search_with_ripgrep(query, callback)
     local opts = config.options
     local cmd = { 'rg', '--json', '--no-heading', '--with-filename', '--line-number' }
@@ -80,9 +73,6 @@ function M.search_with_ripgrep(query, callback)
                         callback(results or {})
                     else
                         vim.notify('Error parsing search results: ' .. tostring(results), vim.log.levels.ERROR)
-                        -- Fallback to non-JSON search
-                        vim.notify('Falling back to non-JSON search...', vim.log.levels.INFO)
-                        M.search_with_vim(query, callback)
                     end
                 else
                     callback({})
@@ -100,14 +90,11 @@ function M.search_with_ripgrep(query, callback)
                         table.insert(filtered_data, line)
                     end
                 end
-                
+
                 if #filtered_data > 0 then
                     local error_msg = table.concat(filtered_data, '\n')
                     vim.notify('Ripgrep error: ' .. error_msg, vim.log.levels.ERROR)
                     vim.notify('Command: ' .. table.concat(cmd, ' '), vim.log.levels.ERROR)
-                    
-                    -- Fallback to vim search if ripgrep fails
-                    M.search_with_vim(query, callback)
                 end
             end
         end,
@@ -179,61 +166,6 @@ function M.parse_ripgrep_output(data)
     table.sort(results, function(a, b) return a.file < b.file end)
 
     return results
-end
-
--- Fallback search using vim functions (slower)
-function M.search_with_vim(query, callback)
-    local opts = config.options
-    local results_map = {}
-
-    -- Get all files in current directory recursively
-    local files = vim.fn.systemlist('find . -type f')
-
-    for _, file in ipairs(files) do
-        -- Skip ignored patterns (convert glob patterns to lua patterns for matching)
-        local should_ignore = false
-        for _, pattern in ipairs(opts.ignore_patterns) do
-            -- Convert simple glob patterns to lua patterns
-            local lua_pattern = pattern
-            if pattern:match('%*') then
-                -- Convert *.ext to %.ext$ 
-                lua_pattern = pattern:gsub('%*', '.*'):gsub('%.', '%%.')
-                if not lua_pattern:match('%$$') then
-                    lua_pattern = lua_pattern .. '$'
-                end
-            elseif pattern:match('/$') then
-                -- Directory patterns like .git/
-                lua_pattern = pattern:gsub('%.', '%%.')
-            else
-                -- Exact matches like .DS_Store
-                lua_pattern = pattern:gsub('%.', '%%.')
-            end
-            
-            if file:match(lua_pattern) then
-                should_ignore = true
-                break
-            end
-        end
-
-        if not should_ignore then
-            local matches = M.search_in_file(file, query, opts.ignore_case)
-            if #matches > 0 then
-                results_map[file] = {
-                    file = file,
-                    matches = matches
-                }
-            end
-        end
-    end
-
-    -- Convert to array and sort
-    local results = {}
-    for _, file_result in pairs(results_map) do
-        table.insert(results, file_result)
-    end
-    table.sort(results, function(a, b) return a.file < b.file end)
-
-    callback(results)
 end
 
 -- Search within a single file
