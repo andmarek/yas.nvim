@@ -27,6 +27,9 @@ function M.create()
         vim.api.nvim_buf_set_option(state.bufnr, 'filetype', 'yas-finder')
         vim.api.nvim_buf_set_name(state.bufnr, 'YAS Finder')
 
+        -- Set up insert mode autocmds for seamless search experience
+        M.setup_search_autocmds(state.bufnr)
+
         M.setup_buffer_keymaps(state.bufnr)
     end
 
@@ -62,6 +65,11 @@ function M.create()
     state.search_mode = true
     M.render_content()
     vim.api.nvim_set_current_win(state.winnr)
+    
+    -- Position cursor at end of search text and enter insert mode
+    local cursor_col = #state.search_query + 2
+    vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+    vim.cmd('startinsert')
 end
 
 -- Close the window
@@ -90,6 +98,72 @@ end
 -- Check if sidebar is currently open
 function M.is_open()
     return state.winnr and vim.api.nvim_win_is_valid(state.winnr)
+end
+
+-- Setup autocmds and insert mode keymaps for seamless search
+function M.setup_search_autocmds(bufnr)
+    -- Create autocmd group for this buffer
+    local group = vim.api.nvim_create_augroup('yas-search-' .. bufnr, { clear = true })
+    
+    -- Handle leaving insert mode
+    vim.api.nvim_create_autocmd('InsertLeave', {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+            if state.search_mode then
+                M.stop_search()
+            end
+        end,
+    })
+    
+    -- Set up insert mode keymaps for text input
+    M.setup_insert_mode_keymaps(bufnr)
+end
+
+-- Setup insert mode keymaps for seamless text input
+function M.setup_insert_mode_keymaps(bufnr)
+    -- All printable characters
+    local chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?`~'
+    for i = 1, #chars do
+        local char = chars:sub(i, i)
+        vim.api.nvim_buf_set_keymap(bufnr, 'i', char, '', {
+            callback = function()
+                if state.search_mode then
+                    state.search_query = state.search_query .. char
+                    M.render_content()
+                    M.perform_search_and_update()
+                end
+            end,
+            noremap = true,
+            silent = true
+        })
+    end
+
+    -- Space
+    vim.api.nvim_buf_set_keymap(bufnr, 'i', '<Space>', '', {
+        callback = function()
+            if state.search_mode then
+                state.search_query = state.search_query .. ' '
+                M.render_content()
+                M.perform_search_and_update()
+            end
+        end,
+        noremap = true,
+        silent = true
+    })
+
+    -- Backspace
+    vim.api.nvim_buf_set_keymap(bufnr, 'i', '<BS>', '', {
+        callback = function()
+            if state.search_mode and #state.search_query > 0 then
+                state.search_query = state.search_query:sub(1, -2)
+                M.render_content()
+                M.perform_search_and_update()
+            end
+        end,
+        noremap = true,
+        silent = true
+    })
 end
 
 -- Setup buffer keymaps
@@ -291,6 +365,9 @@ function M.start_search()
     -- Focus the sidebar window
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         vim.api.nvim_set_current_win(state.winnr)
+        -- Position cursor
+        local cursor_col = #state.search_query + 2
+        vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
     end
 end
 
