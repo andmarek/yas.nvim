@@ -11,7 +11,7 @@ function M.open()
         return
     end
 
-    window.create()
+    window.create_buffer()
 end
 
 -- Close the finder

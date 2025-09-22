@@ -8,12 +8,34 @@ local state = {
     search_query = '',
     search_mode = false, -- Whether we're in search input mode
     results = {},      -- Current search results
-    cursor_line = 4,   -- Line where cursor should be positioned (search input line)
     search_timer = nil, -- Timer for debounced search
 }
 
+-- Helper functions for proper cursor positioning
+local function char_count(s)
+    return vim.fn.strchars(s or "")
+end
+
+local function bytes_of_chars(s, n_chars)
+    -- returns byte index for n_chars codepoints (0 for 0 chars)
+    return vim.str_byteindex(s or "", n_chars or 0)
+end
+
+local function truncated_display(query, max_chars)
+    -- Truncate by characters, not bytes
+    return vim.fn.strcharpart(query or "", 0, max_chars or 32)
+end
+
+local function compute_cursor_col()
+    local prompt = "│ "
+    local prompt_bytes = bytes_of_chars(prompt, char_count(prompt))  -- 4 bytes
+    local display = truncated_display(state.search_query, 32)
+    local display_bytes = bytes_of_chars(display, char_count(display))
+    return prompt_bytes + display_bytes
+end
+
 -- Create the sidebar window
-function M.create()
+function M.create_buffer()
     local opts = config.options
 
     -- Create buffer if it doesn't exist
@@ -69,7 +91,7 @@ function M.create()
     -- Position cursor at end of search text and enter insert mode
     vim.schedule(function()
         if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-            local cursor_col = #state.search_query + 2  -- Account for "│ " prefix
+            local cursor_col = compute_cursor_col()
             vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
             vim.cmd('startinsert')
         end
@@ -126,51 +148,42 @@ end
 
 -- Setup insert mode keymaps for seamless text input
 function M.setup_insert_mode_keymaps(bufnr)
-    -- All printable characters
-    local chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?`~'
-    for i = 1, #chars do
-        local char = chars:sub(i, i)
-        vim.api.nvim_buf_set_keymap(bufnr, 'i', char, '', {
-            callback = function()
-                if state.search_mode then
-                    state.search_query = state.search_query .. char
-                    M.render_content()
-                    M.perform_search_and_update()
-                end
-                return false -- Allow vim to handle the actual insertion
-            end,
-            noremap = true,
-            silent = true
-        })
+    local function commit_change(new_query)
+        state.search_query = new_query
+        M.render_content()
+        M.perform_search_and_update()
     end
 
-    -- Space
-    vim.api.nvim_buf_set_keymap(bufnr, 'i', '<Space>', '', {
-        callback = function()
-            if state.search_mode then
-                state.search_query = state.search_query .. ' '
-                M.render_content()
-                M.perform_search_and_update()
-            end
-            return false -- Allow vim to handle the actual insertion
-        end,
-        noremap = true,
-        silent = true
-    })
-
     -- Backspace
-    vim.api.nvim_buf_set_keymap(bufnr, 'i', '<BS>', '', {
-        callback = function()
-            if state.search_mode and #state.search_query > 0 then
-                state.search_query = state.search_query:sub(1, -2)
-                M.render_content()
-                M.perform_search_and_update()
-            end
-            return false -- Allow vim to handle the actual deletion
-        end,
-        noremap = true,
-        silent = true
-    })
+    vim.keymap.set('i', '<BS>', function()
+        if not state.search_mode then return '<BS>' end
+        local chars = char_count(state.search_query)
+        if chars > 0 then
+            -- remove last character by chars, not bytes
+            local newq = vim.fn.strcharpart(state.search_query, 0, chars - 1)
+            commit_change(newq)
+        end
+        return '' -- do not insert/delete in buffer
+    end, { buffer = bufnr, expr = true, silent = true })
+
+    -- Space
+    vim.keymap.set('i', '<Space>', function()
+        if not state.search_mode then return ' ' end
+        commit_change(state.search_query .. ' ')
+        return ''
+    end, { buffer = bufnr, expr = true, silent = true })
+
+    -- Printable ASCII range
+    for c = 32, 126 do
+        local key = string.char(c)
+        if key ~= ' ' then -- Space handled above
+            vim.keymap.set('i', key, function()
+                if not state.search_mode then return key end
+                commit_change(state.search_query .. key)
+                return ''
+            end, { buffer = bufnr, expr = true, silent = true })
+        end
+    end
 end
 
 -- Setup buffer keymaps
@@ -319,8 +332,9 @@ function M.render_content()
     end
 
     -- Ensure the search display fits within 32 characters and pad properly
-    local truncated = search_display:sub(1, 32)
-    local padded = truncated .. string.rep(' ', math.max(0, 32 - #truncated))
+    local display = truncated_display(search_display, 32)
+    local width = vim.fn.strwidth(display)
+    local padded = display .. string.rep(' ', math.max(0, 32 - width))
     table.insert(lines, '│ ' .. padded .. ' │')
     table.insert(lines, '└──────────────────────────────────┘')
     table.insert(lines, '')
@@ -364,8 +378,8 @@ function M.render_content()
     if state.search_mode and state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         vim.schedule(function()
             if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-                -- Position cursor at the end of the search query (after the text, accounting for "│ " prefix)
-                local cursor_col = #state.search_query + 2 -- 2 for "│ " prefix
+                -- Position cursor at the end of the search query
+                local cursor_col = compute_cursor_col()
                 vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
             end
         end)
@@ -383,7 +397,7 @@ function M.start_search()
         -- Position cursor and enter insert mode
         vim.schedule(function()
             if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-                local cursor_col = #state.search_query + 2
+                local cursor_col = compute_cursor_col()
                 vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
                 vim.cmd('startinsert')
             end
@@ -490,6 +504,12 @@ end
 function M.remove_result()
     -- TODO: Implement result removal
     print('Remove result - TODO: implement')
+end
+
+-- Expose internal state for testing (development only)
+if vim.g.yas_debug then
+    M._get_state = function() return state end
+    M._compute_cursor_col = compute_cursor_col
 end
 
 return M
