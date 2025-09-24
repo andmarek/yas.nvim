@@ -150,6 +150,7 @@ function M.parse_ripgrep_output(data)
                     local length = safe_strchars(query)
                     if json_data.data.submatches and json_data.data.submatches[1] then
                         local submatch = json_data.data.submatches[1]
+                        -- submatch.start is 0-based byte offset, convert to 0-based character offset
                         column = safe_utfindex(line_text, submatch.start or 0)
                         if submatch.match and submatch.match.text then
                             length = safe_strchars(submatch.match.text)
@@ -184,36 +185,6 @@ function M.parse_ripgrep_output(data)
     table.sort(results, function(a, b) return a.file < b.file end)
 
     return results
-end
-
--- Search within a single file
-function M.search_in_file(filepath, query, ignore_case)
-    local matches = {}
-
-    local file = io.open(filepath, 'r')
-    if not file then
-        return matches
-    end
-
-    local line_number = 0
-    local search_query = ignore_case and query:lower() or query
-
-    for line in file:lines() do
-        line_number = line_number + 1
-        local search_line = ignore_case and line:lower() or line
-
-        local start_pos = search_line:find(search_query, 1, true)
-        if start_pos then
-            table.insert(matches, {
-                line_number = line_number,
-                text = line,
-                column = start_pos - 1,
-            })
-        end
-    end
-
-    file:close()
-    return matches
 end
 
 return M

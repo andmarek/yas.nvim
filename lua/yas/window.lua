@@ -83,15 +83,13 @@ function M.trim_match_preview(text, sidebar_width, prefix, column, length)
     local available_width = math.max(5, sidebar_width - vim.fn.strwidth(prefix) - 4)
     local total_chars = vim.fn.strchars(text)
 
-    local match_start = math.max(0, column or 0)
+    local match_start = math.max(0, math.min(column or 0, total_chars))
     local match_length = math.max(1, length or 1)
-    if match_start >= total_chars then
-        match_start = math.max(0, total_chars - 1)
-    end
     local match_end = math.min(total_chars, match_start + match_length)
+    local actual_match_length = match_end - match_start
 
     if vim.fn.strwidth(text) <= available_width then
-        return text, match_start, match_length
+        return text, match_start, actual_match_length
     end
 
     local slice_start = math.max(0, match_start - math.floor(available_width * 0.25))
@@ -103,41 +101,43 @@ function M.trim_match_preview(text, sidebar_width, prefix, column, length)
         slice_start = math.max(0, slice_end - available_width)
     end
     if match_start < slice_start then
-        slice_start = math.max(0, match_start)
+        slice_start = match_start
         slice_end = math.min(total_chars, slice_start + available_width)
     end
 
-    local slice_len = math.max(0, slice_end - slice_start)
+    local slice_len = slice_end - slice_start
     local snippet = vim.fn.strcharpart(text, slice_start, slice_len)
-    local snippet_chars = vim.fn.strchars(snippet)
 
     local highlight_start = match_start - slice_start
-    local highlight_len = math.max(0, match_end - match_start)
+    local highlight_len = actual_match_length
 
     local needs_left = slice_start > 0
     local needs_right = slice_end < total_chars
 
     if needs_left then
-        snippet = '…' .. vim.fn.strcharpart(snippet, 1, math.max(0, snippet_chars - 1))
-        highlight_start = highlight_start + 1
+        snippet = '…' .. snippet:sub(2)  -- Remove first char and add ellipsis
+        if highlight_start > 0 then
+            highlight_start = highlight_start
+        else
+            -- Match starts in the removed part
+            highlight_len = highlight_len - 1 + highlight_start
+            highlight_start = 1
+        end
     end
 
-    snippet_chars = vim.fn.strchars(snippet)
-    if needs_right then
-        snippet = vim.fn.strcharpart(snippet, 0, math.max(0, snippet_chars - 1)) .. '…'
+    if needs_right and vim.fn.strchars(snippet) > 0 then
+        local snippet_chars = vim.fn.strchars(snippet)
+        snippet = vim.fn.strcharpart(snippet, 0, snippet_chars - 1) .. '…'
+        -- Adjust highlight if it extends past the truncation
+        if highlight_start + highlight_len > snippet_chars then
+            highlight_len = math.max(0, snippet_chars - highlight_start)
+        end
     end
 
-    snippet_chars = vim.fn.strchars(snippet)
-    if highlight_start < 0 then
-        highlight_len = highlight_len + highlight_start
-        highlight_start = 0
-    end
-    if highlight_start + highlight_len > snippet_chars then
-        highlight_len = math.max(0, snippet_chars - highlight_start)
-    end
-    if highlight_len <= 0 then
-        highlight_len = math.min(1, math.max(0, snippet_chars - highlight_start))
-    end
+    -- Final bounds checking
+    local final_snippet_chars = vim.fn.strchars(snippet)
+    highlight_start = math.max(0, math.min(highlight_start, final_snippet_chars - 1))
+    highlight_len = math.max(1, math.min(highlight_len, final_snippet_chars - highlight_start))
 
     return snippet, highlight_start, highlight_len
 end
@@ -531,10 +531,18 @@ function M.render_content()
 
                 if not is_collapsed then
                     for match_index, match in ipairs(file_result.matches) do
-                        local preview = match.text:gsub('[\r\n]', ' '):gsub('^%s*', ''):gsub('%s*$', '')
-                        local prefix = string.format('    %d: ', match.line_number)
-                        local trimmed_preview, highlight_start, highlight_len = M.trim_match_preview(preview, sidebar_width, prefix, match.column, match.length)
-                        table.insert(lines, prefix .. trimmed_preview)
+                    -- Clean the line text but preserve original positioning info
+                    local original_line = match.text:gsub('[\r\n]', ' ')
+                    local leading_whitespace = string.match(original_line, '^%s*') or ''
+                    local whitespace_char_count = vim.fn.strchars(leading_whitespace)
+                    local preview = original_line:gsub('^%s*', ''):gsub('%s*$', '')
+                    
+                    -- Adjust column to account for removed leading whitespace
+                    local adjusted_column = math.max(0, (match.column or 0) - whitespace_char_count)
+                    
+                    local prefix = string.format('    %d: ', match.line_number)
+                    local trimmed_preview, highlight_start, highlight_len = M.trim_match_preview(preview, sidebar_width, prefix, adjusted_column, match.length)
+                    table.insert(lines, prefix .. trimmed_preview)
                         table.insert(idx_map, {
                             type = 'match',
                             file_index = file_index,
