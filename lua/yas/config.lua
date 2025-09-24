@@ -25,6 +25,7 @@ M.defaults = {
         file_name = 'Directory',
         line_number = 'LineNr',
         context = 'Comment',
+        selection = 'Visual',
     },
 
     -- Keybindings within the finder window

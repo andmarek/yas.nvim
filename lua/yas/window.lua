@@ -11,6 +11,8 @@ local state = {
     results = {},      -- Current search results
     search_timer = nil, -- Timer for debounced search
     line_index = {},    -- Map buffer line -> result entry {type, file_index, match_index}
+    ns = nil,           -- Highlight namespace
+    collapsed_files = {},
 }
 
 -- Helper functions for proper cursor positioning
@@ -55,6 +57,12 @@ function M.create_buffer()
         M.setup_search_autocmds(state.bufnr)
 
         M.setup_buffer_keymaps(state.bufnr)
+
+        -- Create highlight namespace
+        state.ns = vim.api.nvim_create_namespace('yas-finder')
+
+        -- Ensure selection highlight follows the cursor
+        M.ensure_cursor_highlight_autocmd()
     end
 
     -- Save current window to return focus later
@@ -213,6 +221,17 @@ function M.setup_buffer_keymaps(bufnr)
                 M.stop_search()
             else
                 M.select_result()
+            end
+        end,
+        noremap = true,
+        silent = true
+    })
+
+    -- Toggle file expand/collapse
+    vim.api.nvim_buf_set_keymap(bufnr, 'n', keymaps.toggle_file or 'za', '', {
+        callback = function()
+            if not state.search_mode then
+                M.toggle_file()
             end
         end,
         noremap = true,
@@ -382,16 +401,25 @@ function M.render_content()
 
             for file_index, file_result in ipairs(state.results) do
                 local clean_filename = file_result.file:gsub('[\r\n]', '')
-                table.insert(lines, string.format('📁 %s (%d matches)', clean_filename, #file_result.matches))
-                table.insert(idx_map, { type = 'file', file_index = file_index })
+                local is_collapsed = state.collapsed_files[clean_filename] == true
+                local icon = is_collapsed and '▸' or '▾'
+                table.insert(lines, string.format('%s 📁 %s (%d matches)', icon, clean_filename, #file_result.matches))
+                table.insert(idx_map, {
+                    type = 'file',
+                    file_index = file_index,
+                    collapsed = is_collapsed,
+                    file = clean_filename,
+                })
 
-                for match_index, match in ipairs(file_result.matches) do
-                    local preview = match.text:gsub('[\r\n]', ' '):gsub('^%s*', ''):gsub('%s*$', ''):sub(1, 45)
-                    table.insert(lines, string.format('    %d: %s', match.line_number, preview))
-                    table.insert(idx_map, { type = 'match', file_index = file_index, match_index = match_index })
+                if not is_collapsed then
+                    for match_index, match in ipairs(file_result.matches) do
+                        local preview = match.text:gsub('[\r\n]', ' '):gsub('^%s*', ''):gsub('%s*$', ''):sub(1, 45)
+                        table.insert(lines, string.format('    %d: %s', match.line_number, preview))
+                        table.insert(idx_map, { type = 'match', file_index = file_index, match_index = match_index })
+                    end
+                    table.insert(lines, '')
+                    table.insert(idx_map, { type = 'blank' })
                 end
-                table.insert(lines, '')
-                table.insert(idx_map, { type = 'blank' })
             end
         end
     end
@@ -402,6 +430,9 @@ function M.render_content()
 
     -- Save line index for navigation
     state.line_index = idx_map
+
+    -- Refresh selection highlight after render
+    M.update_selection_highlight()
 
     -- Position cursor on search line when in search mode (use vim.schedule to avoid timing issues)
     if state.search_mode and state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
@@ -566,10 +597,70 @@ function M.select_result()
     end
 end
 
+-- Update selection highlight (current cursor line if it's a file or match)
+function M.update_selection_highlight()
+    if not state.bufnr or not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+    if not state.ns then state.ns = vim.api.nvim_create_namespace('yas-finder') end
+
+    vim.api.nvim_buf_clear_namespace(state.bufnr, state.ns, 0, -1)
+
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then return end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+    if not entry then return end
+
+    if entry.type == 'match' or entry.type == 'file' then
+        local hl = config.options.highlights.selection or 'Visual'
+        -- Highlight the entire line
+        vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, hl, line - 1, 0, -1)
+    end
+end
+
+-- Autocmd to refresh selection highlight on CursorMoved within the window
+do
+    local group
+    function M.ensure_cursor_highlight_autocmd()
+        if not state.bufnr or not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+        if group then return end
+        group = vim.api.nvim_create_augroup('yas-finder-cursor-' .. state.bufnr, { clear = true })
+        vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'WinEnter', 'BufEnter' }, {
+            group = group,
+            buffer = state.bufnr,
+            callback = function()
+                M.update_selection_highlight()
+            end,
+        })
+    end
+end
+
 -- Toggle file expand/collapse
 function M.toggle_file()
-    -- TODO: Implement file toggle
-    print('Toggle file - TODO: implement')
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+    if not entry or entry.type ~= 'file' then
+        return
+    end
+
+    local record = state.results[entry.file_index]
+    if not record then
+        return
+    end
+
+    local clean_filename = record.file
+    if not clean_filename then
+        return
+    end
+
+    state.collapsed_files[clean_filename] = not entry.collapsed
+
+    M.render_content()
 end
 
 -- Remove result
