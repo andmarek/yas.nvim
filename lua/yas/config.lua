@@ -26,6 +26,15 @@ M.defaults = {
         line_number = 'LineNr',
         context = 'Comment',
         selection = 'Visual',
+        title = 'Title',
+        subtitle = 'Comment',
+        prompt = 'Identifier',
+        input = 'Normal',
+        divider = 'LineNr',
+        section = 'Include',
+        folder_icon = 'Special',
+        match_count = 'Number',
+        help_text = 'Comment',
     },
 
     -- Keybindings within the finder window

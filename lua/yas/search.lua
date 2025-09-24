@@ -7,6 +7,18 @@ local DEFAULTS = {
     FIND_COMMAND = 'find . -type f',
 }
 
+local function safe_strchars(text)
+    local ok, len = pcall(vim.fn.strchars, text or '')
+    if ok then return len end
+    return (text and #text) or 0
+end
+
+local function safe_utfindex(text, byte_index)
+    local ok, idx = pcall(vim.str_utfindex, text or '', byte_index or 0)
+    if ok then return idx end
+    return byte_index or 0
+end
+
 -- Perform search in files
 function M.perform_search(query, callback)
     if not query or query == '' then
@@ -135,14 +147,20 @@ function M.parse_ripgrep_output(data)
                     end
 
                     local column = 0
+                    local length = safe_strchars(query)
                     if json_data.data.submatches and json_data.data.submatches[1] then
-                        column = json_data.data.submatches[1].start or 0
+                        local submatch = json_data.data.submatches[1]
+                        column = safe_utfindex(line_text, submatch.start or 0)
+                        if submatch.match and submatch.match.text then
+                            length = safe_strchars(submatch.match.text)
+                        end
                     end
 
                     table.insert(results_map[file_path].matches, {
                         line_number = line_number,
                         text = line_text,
                         column = column,
+                        length = length,
                     })
                 end
             elseif not ok then
