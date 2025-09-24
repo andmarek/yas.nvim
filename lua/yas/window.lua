@@ -13,6 +13,8 @@ local state = {
     line_index = {},    -- Map buffer line -> result entry {type, file_index, match_index}
     ns = nil,           -- Highlight namespace
     collapsed_files = {},
+    resize_group = nil,
+    last_sidebar_width = nil,
 }
 
 -- Helper functions for proper cursor positioning
@@ -32,10 +34,39 @@ end
 
 local function compute_cursor_col()
     local prompt = "│ "
-    local prompt_bytes = bytes_of_chars(prompt, char_count(prompt))  -- 4 bytes
-    local display = truncated_display(state.search_query, 32)
+    local prompt_chars = char_count(prompt)
+    local prompt_bytes = bytes_of_chars(prompt, prompt_chars)
+    local sidebar_width = M.get_sidebar_width()
+    local max_chars = math.max(0, sidebar_width - 4)
+    local display = truncated_display(state.search_query, max_chars)
     local display_bytes = bytes_of_chars(display, char_count(display))
     return prompt_bytes + display_bytes
+end
+
+function M.get_sidebar_width()
+    if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+        local ok, win_width = pcall(vim.api.nvim_win_get_width, state.winnr)
+        if ok and type(win_width) == 'number' then
+            return math.max(win_width, 1)
+        end
+    end
+    return config.options.width or 40
+end
+
+function M.trim_match_preview(text, sidebar_width, prefix)
+    prefix = prefix or ''
+    sidebar_width = sidebar_width or M.get_sidebar_width()
+    local available_width = sidebar_width - vim.fn.strwidth(prefix) - 4 -- padding for margins
+    if available_width <= 1 then
+        return '…'
+    end
+
+    if vim.fn.strwidth(text) <= available_width then
+        return text
+    end
+
+    local truncated = vim.fn.strcharpart(text, 0, available_width - 1)
+    return truncated .. '…'
 end
 
 -- Create the sidebar window
@@ -93,6 +124,9 @@ function M.create_buffer()
     vim.api.nvim_win_set_option(state.winnr, 'winfixwidth', true)
     vim.api.nvim_win_set_option(state.winnr, 'signcolumn', 'no')
     vim.api.nvim_win_set_option(state.winnr, 'foldcolumn', '0')
+
+    M.ensure_resize_autocmd()
+    state.last_sidebar_width = M.get_sidebar_width()
 
     -- Start in search mode and focus the sidebar
     state.search_mode = true
@@ -346,6 +380,10 @@ function M.render_content()
 
     local lines = {}
     local idx_map = {}
+    local sidebar_width = M.get_sidebar_width()
+    if state.last_sidebar_width ~= sidebar_width then
+        state.last_sidebar_width = sidebar_width
+    end
 
     -- Header
     table.insert(lines, '┌─ YAS Finder ─────────────────────┐')
@@ -360,9 +398,10 @@ function M.render_content()
     end
 
     -- Ensure the search display fits within 32 characters and pad properly
-    local display = truncated_display(search_display, 32)
-    local width = vim.fn.strwidth(display)
-    local padded = display .. string.rep(' ', math.max(0, 32 - width))
+    local display = truncated_display(search_display, math.max(0, sidebar_width - 4))
+    local display_width = vim.fn.strwidth(display)
+    local max_input_width = math.max(0, sidebar_width - 4)
+    local padded = display .. string.rep(' ', math.max(0, max_input_width - display_width))
     table.insert(lines, '│ ' .. padded .. ' │')
     table.insert(idx_map, { type = 'input' })
     table.insert(lines, '└──────────────────────────────────┘')
@@ -403,7 +442,8 @@ function M.render_content()
                 local clean_filename = file_result.file:gsub('[\r\n]', '')
                 local is_collapsed = state.collapsed_files[clean_filename] == true
                 local icon = is_collapsed and '▸' or '▾'
-                table.insert(lines, string.format('%s 📁 %s (%d matches)', icon, clean_filename, #file_result.matches))
+                local header = string.format('%s 📁 %s (%d matches)', icon, clean_filename, #file_result.matches)
+                table.insert(lines, header)
                 table.insert(idx_map, {
                     type = 'file',
                     file_index = file_index,
@@ -413,8 +453,10 @@ function M.render_content()
 
                 if not is_collapsed then
                     for match_index, match in ipairs(file_result.matches) do
-                        local preview = match.text:gsub('[\r\n]', ' '):gsub('^%s*', ''):gsub('%s*$', ''):sub(1, 45)
-                        table.insert(lines, string.format('    %d: %s', match.line_number, preview))
+                        local preview = match.text:gsub('[\r\n]', ' '):gsub('^%s*', ''):gsub('%s*$', '')
+                        local prefix = string.format('    %d: ', match.line_number)
+                        local trimmed_preview = M.trim_match_preview(preview, sidebar_width, prefix)
+                        table.insert(lines, prefix .. trimmed_preview)
                         table.insert(idx_map, { type = 'match', file_index = file_index, match_index = match_index })
                     end
                     table.insert(lines, '')
@@ -661,6 +703,54 @@ function M.toggle_file()
     state.collapsed_files[clean_filename] = not entry.collapsed
 
     M.render_content()
+end
+
+function M.ensure_resize_autocmd()
+    if not state.bufnr or not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+    if state.resize_group then return end
+
+    local group_name = 'yas-resize-' .. state.bufnr
+    state.resize_group = vim.api.nvim_create_augroup(group_name, { clear = true })
+
+    vim.api.nvim_create_autocmd('VimResized', {
+        group = state.resize_group,
+        callback = function()
+            if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+                return
+            end
+            local new_width = M.get_sidebar_width()
+            if state.last_sidebar_width ~= new_width then
+                state.last_sidebar_width = new_width
+                vim.schedule(M.render_content)
+            end
+        end,
+    })
+
+    -- window-local resize (e.g., dragging vsplit)
+    vim.api.nvim_create_autocmd('WinResized', {
+        group = state.resize_group,
+        callback = function(args)
+            if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+                return
+            end
+
+            if args and args.match then
+                local tab, win = args.match:match('^(%d+):(%d+)$')
+                if tab and win then
+                    local winid = vim.fn.win_getid(tonumber(win), tonumber(tab))
+                    if winid ~= state.winnr then
+                        return
+                    end
+                end
+            end
+
+            local new_width = M.get_sidebar_width()
+            if state.last_sidebar_width ~= new_width then
+                state.last_sidebar_width = new_width
+                vim.schedule(M.render_content)
+            end
+        end,
+    })
 end
 
 -- Remove result
