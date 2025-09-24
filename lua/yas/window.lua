@@ -5,10 +5,12 @@ local M = {}
 local state = {
     bufnr = nil,
     winnr = nil,
+    prev_winnr = nil,
     search_query = '',
     search_mode = false, -- Whether we're in search input mode
     results = {},      -- Current search results
     search_timer = nil, -- Timer for debounced search
+    line_index = {},    -- Map buffer line -> result entry {type, file_index, match_index}
 }
 
 -- Helper functions for proper cursor positioning
@@ -57,6 +59,7 @@ function M.create_buffer()
 
     -- Save current window to return focus later
     local current_win = vim.api.nvim_get_current_win()
+    state.prev_winnr = current_win
 
     -- Create sidebar split
     if opts.position == 'left' then
@@ -87,7 +90,7 @@ function M.create_buffer()
     state.search_mode = true
     M.render_content()
     vim.api.nvim_set_current_win(state.winnr)
-    
+
     -- Position cursor at end of search text and enter insert mode
     vim.schedule(function()
         if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
@@ -150,8 +153,11 @@ end
 function M.setup_insert_mode_keymaps(bufnr)
     local function commit_change(new_query)
         state.search_query = new_query
-        M.render_content()
-        M.perform_search_and_update()
+        -- Defer rendering to avoid "not allowed to change text" error during expr evaluation
+        vim.schedule(function()
+            M.render_content()
+            M.perform_search_and_update()
+        end)
     end
 
     -- Backspace
@@ -320,10 +326,13 @@ function M.render_content()
     if not state.bufnr then return end
 
     local lines = {}
+    local idx_map = {}
 
     -- Header
     table.insert(lines, '┌─ YAS Finder ─────────────────────┐')
+    table.insert(idx_map, { type = 'header' })
     table.insert(lines, '│ Search in files:                 │')
+    table.insert(idx_map, { type = 'header' })
 
     -- Search input line - properly format to fit in box
     local search_display = state.search_query
@@ -336,36 +345,53 @@ function M.render_content()
     local width = vim.fn.strwidth(display)
     local padded = display .. string.rep(' ', math.max(0, 32 - width))
     table.insert(lines, '│ ' .. padded .. ' │')
+    table.insert(idx_map, { type = 'input' })
     table.insert(lines, '└──────────────────────────────────┘')
+    table.insert(idx_map, { type = 'header' })
     table.insert(lines, '')
+    table.insert(idx_map, { type = 'blank' })
 
     -- Results or help
     if state.search_query == '' then
         table.insert(lines, 'Keybindings:')
+        table.insert(idx_map, { type = 'help' })
         table.insert(lines, '  i     - Start search')
+        table.insert(idx_map, { type = 'help' })
         table.insert(lines, '  <CR>  - Go to result')
+        table.insert(idx_map, { type = 'help' })
         table.insert(lines, '  za    - Toggle file')
+        table.insert(idx_map, { type = 'help' })
         table.insert(lines, '  dd    - Remove result')
+        table.insert(idx_map, { type = 'help' })
         table.insert(lines, '  q     - Close finder')
+        table.insert(idx_map, { type = 'help' })
         table.insert(lines, '')
+        table.insert(idx_map, { type = 'blank' })
         table.insert(lines, 'Start typing to search files...')
+        table.insert(idx_map, { type = 'help' })
     else
         -- Show results
         if #state.results == 0 then
             table.insert(lines, string.format('No results for: %s', state.search_query))
+            table.insert(idx_map, { type = 'empty' })
         else
             table.insert(lines, string.format('Results for: %s', state.search_query))
+            table.insert(idx_map, { type = 'label' })
             table.insert(lines, '')
+            table.insert(idx_map, { type = 'blank' })
 
-            for _, file_result in ipairs(state.results) do
+            for file_index, file_result in ipairs(state.results) do
                 local clean_filename = file_result.file:gsub('[\r\n]', '')
                 table.insert(lines, string.format('📁 %s (%d matches)', clean_filename, #file_result.matches))
+                table.insert(idx_map, { type = 'file', file_index = file_index })
 
-                for _, match in ipairs(file_result.matches) do
+                for match_index, match in ipairs(file_result.matches) do
                     local preview = match.text:gsub('[\r\n]', ' '):gsub('^%s*', ''):gsub('%s*$', ''):sub(1, 45)
                     table.insert(lines, string.format('    %d: %s', match.line_number, preview))
+                    table.insert(idx_map, { type = 'match', file_index = file_index, match_index = match_index })
                 end
                 table.insert(lines, '')
+                table.insert(idx_map, { type = 'blank' })
             end
         end
     end
@@ -373,6 +399,9 @@ function M.render_content()
     vim.api.nvim_set_option_value('modifiable', true, { buf = state.bufnr })
     vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, lines)
     vim.api.nvim_set_option_value('modifiable', false, { buf = state.bufnr })
+
+    -- Save line index for navigation
+    state.line_index = idx_map
 
     -- Position cursor on search line when in search mode (use vim.schedule to avoid timing issues)
     if state.search_mode and state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
@@ -490,8 +519,51 @@ end
 
 -- Select current result
 function M.select_result()
-    -- TODO: Implement navigation to selected result
-    print('Select result - TODO: implement')
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+    if not entry then return end
+
+    local function open_location(filepath, lnum, col)
+        local fname = vim.fn.fnamemodify(filepath, ':p')
+
+        -- Choose a target window (prefer previous window)
+        local target_win = state.prev_winnr
+        if not target_win or not vim.api.nvim_win_is_valid(target_win) or target_win == state.winnr then
+            -- Try go to previous window; if still the sidebar, create a split
+            vim.cmd('wincmd p')
+            target_win = vim.api.nvim_get_current_win()
+            if target_win == state.winnr then
+                vim.cmd('vsplit')
+                target_win = vim.api.nvim_get_current_win()
+            end
+        else
+            vim.api.nvim_set_current_win(target_win)
+        end
+
+        vim.cmd('edit ' .. vim.fn.fnameescape(fname))
+        pcall(vim.api.nvim_win_set_cursor, target_win, { lnum, math.max(0, col or 0) })
+        vim.cmd('normal! zvzz')
+    end
+
+    if entry.type == 'match' then
+        local file_result = state.results[entry.file_index]
+        if not file_result then return end
+        local match = file_result.matches[entry.match_index]
+        if not match then return end
+        open_location(file_result.file, match.line_number, match.column)
+    elseif entry.type == 'file' then
+        local file_result = state.results[entry.file_index]
+        if not file_result then return end
+        local first = file_result.matches[1]
+        local line_number = first and first.line_number or 1
+        local col = first and first.column or 0
+        open_location(file_result.file, line_number, col)
+    end
 end
 
 -- Toggle file expand/collapse
