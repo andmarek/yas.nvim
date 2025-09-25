@@ -1,5 +1,6 @@
 local config = require('yas.config')
 local highlight = require('yas.highlight')
+local render = require('yas.render')
 
 local M = {}
 
@@ -53,21 +54,9 @@ local function compute_cursor_col()
     return prompt_bytes + display_bytes
 end
 
-local function make_divider(width)
-    return '  ' .. string.rep('─', math.max(0, (width or 0) - 2))
-end
 
-local function safe_byteindex(text, char_index)
-    text = text or ''
-    local total_chars = vim.fn.strchars(text)
-    local target = math.max(0, math.min(char_index or 0, total_chars))
-    local ok, result = pcall(vim.str_byteindex, text, target)
-    if ok and result then
-        return result
-    end
-    return #text
-end
 
+-- Returns the width of the sidebar in characters (display columns)
 function M.get_sidebar_width()
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         local ok, win_width = pcall(vim.api.nvim_win_get_width, state.winnr)
@@ -78,6 +67,7 @@ function M.get_sidebar_width()
     return config.options.width or 40
 end
 
+-- Trims the match preview to fit within the sidebar width
 function M.trim_match_preview(text, sidebar_width, prefix, column, length)
     prefix = prefix or ''
     sidebar_width = sidebar_width or M.get_sidebar_width()
@@ -453,117 +443,19 @@ function M.render_initial()
 end
 
 -- Render the complete sidebar content
+-- Render the complete sidebar content
 function M.render_content()
     if not state.bufnr then return end
 
-    local lines = {}
-    local idx_map = {}
     local sidebar_width = M.get_sidebar_width()
+
+    -- If the last sidebar width is different than the current width,
+    -- then update the state's last sidebar width
     if state.last_sidebar_width ~= sidebar_width then
         state.last_sidebar_width = sidebar_width
     end
 
-    -- Header
-    table.insert(lines, '  YAS Finder')
-    table.insert(idx_map, { type = 'header' })
-    table.insert(lines, '  Search across files')
-    table.insert(idx_map, { type = 'header' })
-
-    -- Search input line - properly format to fit in box
-    local search_display = state.search_query
-    if search_display == '' then
-        search_display = '(type to search...)'
-    end
-
-    -- Ensure the search display fits within 32 characters and pad properly
-    local display = truncated_display(search_display, math.max(0, sidebar_width - 4))
-    local display_width = vim.fn.strwidth(display)
-    local max_input_width = math.max(0, sidebar_width - 4)
-    local padded = display .. string.rep(' ', math.max(0, max_input_width - display_width))
-    table.insert(lines, '> ' .. padded)
-    table.insert(idx_map, { type = 'input', width = max_input_width })
-    table.insert(lines, make_divider(sidebar_width))
-    table.insert(idx_map, { type = 'divider' })
-    table.insert(lines, '')
-    table.insert(idx_map, { type = 'blank' })
-    table.insert(lines, '')
-    table.insert(idx_map, { type = 'blank' })
-
-    -- Results or help
-    if state.search_query == '' then
-        table.insert(lines, ' Keybindings')
-        table.insert(idx_map, { type = 'help' })
-        table.insert(lines, '   i     Start search')
-        table.insert(idx_map, { type = 'help' })
-        table.insert(lines, '   <CR>  Open result')
-        table.insert(idx_map, { type = 'help' })
-        table.insert(lines, '   za    Toggle file group')
-        table.insert(idx_map, { type = 'help' })
-        table.insert(lines, '   dd    Remove result (soon)')
-        table.insert(idx_map, { type = 'help' })
-        table.insert(lines, '   q     Close finder')
-        table.insert(idx_map, { type = 'help' })
-        table.insert(lines, '')
-        table.insert(idx_map, { type = 'blank' })
-        table.insert(lines, ' Start typing to search across your project')
-        table.insert(idx_map, { type = 'help' })
-    else
-        -- Show results
-        if #state.results == 0 then
-        table.insert(lines, string.format(' No results for “%s”', state.search_query))
-            table.insert(idx_map, { type = 'empty' })
-        else
-            table.insert(lines, string.format(' Results for “%s”', state.search_query))
-            table.insert(idx_map, { type = 'label' })
-            table.insert(lines, make_divider(sidebar_width))
-            table.insert(idx_map, { type = 'divider' })
-            table.insert(lines, '')
-            table.insert(idx_map, { type = 'blank' })
-
-            for file_index, file_result in ipairs(state.results) do
-                local clean_filename = file_result.file:gsub('[\r\n]', '')
-                local is_collapsed = state.collapsed_files[clean_filename] == true
-                local icon = is_collapsed and '▸' or '▾'
-                local header = string.format('%s %s (%d matches)', icon, clean_filename, #file_result.matches)
-                table.insert(lines, header)
-                table.insert(idx_map, {
-                    type = 'file',
-                    file_index = file_index,
-                    collapsed = is_collapsed,
-                    file = clean_filename,
-                })
-
-                if not is_collapsed then
-                    for match_index, match in ipairs(file_result.matches) do
-                    -- Clean the line text but preserve original positioning info
-                    local original_line = match.text:gsub('[\r\n]', ' ')
-                    local leading_whitespace = string.match(original_line, '^%s*') or ''
-                    local whitespace_char_count = vim.fn.strchars(leading_whitespace)
-                    local preview = original_line:gsub('^%s*', ''):gsub('%s*$', '')
-                    
-                    -- Adjust column to account for removed leading whitespace
-                    local adjusted_column = math.max(0, (match.column or 0) - whitespace_char_count)
-                    
-                    local prefix = string.format('    %d: ', match.line_number)
-                    local trimmed_preview, highlight_start, highlight_len = M.trim_match_preview(preview, sidebar_width, prefix, adjusted_column, match.length)
-                    table.insert(lines, prefix .. trimmed_preview)
-                        table.insert(idx_map, {
-                            type = 'match',
-                            file_index = file_index,
-                            match_index = match_index,
-                            prefix = prefix,
-                            highlight_start = highlight_start,
-                            highlight_length = highlight_len,
-                        })
-                    end
-                    table.insert(lines, '')
-                    table.insert(idx_map, { type = 'blank' })
-                end
-            end
-            table.insert(lines, make_divider(sidebar_width))
-            table.insert(idx_map, { type = 'divider' })
-        end
-    end
+    local lines, idx_map = render.render_content(state, sidebar_width, M.trim_match_preview)
 
     vim.api.nvim_set_option_value('modifiable', true, { buf = state.bufnr })
     vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, lines)
