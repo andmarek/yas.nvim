@@ -38,7 +38,7 @@ local function stop_internal()
         end
         state.search_timer = nil
     end
-    
+
     -- Cancel any running jobs
     for job_id in pairs(state.running_jobs) do
         pcall(vim.fn.jobstop, job_id)
@@ -130,7 +130,7 @@ local function search_with_ripgrep(query, callback)
     table.insert(cmd, '.')
 
     local actual_job_id = nil
-    
+
     local job_ok, job_id = pcall(vim.fn.jobstart, cmd, {
         stdout_buffered = true,
         on_stdout = function(job_id_param, data)
@@ -138,7 +138,7 @@ local function search_with_ripgrep(query, callback)
             if actual_job_id then
                 state.running_jobs[actual_job_id] = nil
             end
-            
+
             if data and #data > 0 then
                 -- Filter out empty lines
                 local filtered_data = {}
@@ -180,11 +180,11 @@ local function search_with_ripgrep(query, callback)
             end
         end,
         on_exit = function(job_id_param, code)
-            -- Remove this job from running jobs using the parameter  
+            -- Remove this job from running jobs using the parameter
             if actual_job_id then
                 state.running_jobs[actual_job_id] = nil
             end
-            
+
             if code ~= 0 and code ~= 1 then -- ripgrep returns 1 when no matches found
                 vim.notify('Ripgrep exited with code: ' .. code, vim.log.levels.WARN)
             end
@@ -210,20 +210,20 @@ function M.request(query, on_done)
         vim.notify('Search callback must be a function', vim.log.levels.ERROR)
         return
     end
-    
+
     -- Stop any existing search
     stop_internal()
-    
+
     -- Update current query
     state.current_query = query or ''
-    
+
     -- Handle empty query
     if state.current_query == '' then
         state.last_results = {}
         on_done({})
         return
     end
-    
+
     -- Start debounced search
     state.search_timer = vim.loop.new_timer()
     state.search_timer:start(DEFAULTS.DEBOUNCE_MS, 0, vim.schedule_wrap(function()
@@ -234,13 +234,13 @@ function M.request(query, on_done)
                 on_done(state.last_results)
             end)
         end)
-        
+
         if not search_ok then
             vim.notify('Search error: ' .. tostring(search_err), vim.log.levels.ERROR)
             state.last_results = {}
             on_done({})
         end
-        
+
         -- Clean up timer
         if state.search_timer and not state.search_timer:is_closing() then
             state.search_timer:close()

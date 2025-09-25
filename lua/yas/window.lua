@@ -10,10 +10,10 @@ local state = {
     winnr = nil,
     prev_winnr = nil,
     search_mode = false, -- Whether we're in search input mode
-    results = {},      -- Current search results
-    line_index = {},    -- Map buffer line -> result entry {type, file_index, match_index}
-    ns = nil,           -- Highlight namespace for selection
-    ns_ui = nil,        -- Highlight namespace for UI accents
+    results = {},        -- Current search results
+    line_index = {},     -- Map buffer line -> result entry {type, file_index, match_index}
+    ns = nil,            -- Highlight namespace for selection
+    ns_ui = nil,         -- Highlight namespace for UI accents
     collapsed_files = {},
     resize_group = nil,
     last_sidebar_width = nil,
@@ -107,7 +107,7 @@ function M.trim_match_preview(text, sidebar_width, prefix, column, length)
     local needs_right = slice_end < total_chars
 
     if needs_left then
-        snippet = '…' .. snippet:sub(2)  -- Remove first char and add ellipsis
+        snippet = '…' .. snippet:sub(2) -- Remove first char and add ellipsis
         if highlight_start > 0 then
             highlight_start = highlight_start
         else
@@ -214,10 +214,10 @@ function M.close()
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         -- Stop any running searches
         search_engine.stop()
-        
+
         -- Clear all highlights before closing
         highlight.clear_all_highlights()
-        
+
         -- Switch to the sidebar window before closing to avoid issues
         local current_win = vim.api.nvim_get_current_win()
         vim.api.nvim_set_current_win(state.winnr)
@@ -247,7 +247,7 @@ end
 function M.setup_search_autocmds(bufnr)
     -- Create autocmd group for this buffer
     local group = vim.api.nvim_create_augroup('yas-search-' .. bufnr, { clear = true })
-    
+
     -- Handle leaving insert mode
     vim.api.nvim_create_autocmd('InsertLeave', {
         group = group,
@@ -258,7 +258,7 @@ function M.setup_search_autocmds(bufnr)
             end
         end,
     })
-    
+
     -- Set up insert mode keymaps for text input
     M.setup_insert_mode_keymaps(bufnr)
 end
@@ -514,7 +514,7 @@ end
 -- Handle character input during search
 function M.handle_char_input(char)
     if not state.search_mode then return end
-    
+
     local current_query = search_engine.current_query()
 
     if char == '\b' or char == '\127' then -- Backspace
@@ -582,7 +582,7 @@ function M.select_result()
         vim.cmd('edit ' .. vim.fn.fnameescape(fname))
         pcall(vim.api.nvim_win_set_cursor, target_win, { lnum, math.max(0, col or 0) })
         vim.cmd('normal! zvzz')
-        
+
         -- Highlight the focused match using our highlight module
         if length then
             local bufnr = vim.fn.bufnr('%')
@@ -683,35 +683,45 @@ function M.apply_result_highlights()
     local lines = vim.api.nvim_buf_get_lines(state.bufnr, 0, -1, false)
     for idx, meta in ipairs(state.line_index) do
         if meta.type == 'header' and idx == 1 then
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.title or 'Title', idx - 1, 0, -1)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.title or 'Title', idx - 1,
+                0, -1)
         elseif meta.type == 'header' and idx == 2 then
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.subtitle or 'Comment', idx - 1, 0, -1)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.subtitle or 'Comment',
+                idx - 1, 0, -1)
         elseif meta.type == 'divider' then
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.divider or 'LineNr', idx - 1, 0, -1)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.divider or 'LineNr',
+                idx - 1, 0, -1)
         elseif meta.type == 'input' then
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.prompt or 'Identifier', idx - 1, 0, 2)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.prompt or 'Identifier',
+                idx - 1, 0, 2)
             local line = lines[idx] or ''
             local prompt_width = 2
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.input or 'Normal', idx - 1, prompt_width, -1)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.input or 'Normal', idx - 1,
+                prompt_width, -1)
         elseif meta.type == 'label' then
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.section or 'Include', idx - 1, 0, -1)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.section or 'Include',
+                idx - 1, 0, -1)
         elseif meta.type == 'file' then
             local line = lines[idx] or ''
             local icon_end = vim.fn.byteidx(line, char_count('▾ '))
             if icon_end > 0 then
-                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.folder_icon or 'Special', idx - 1, 0, icon_end)
+                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui,
+                    config.options.highlights.folder_icon or 'Special', idx - 1, 0, icon_end)
             end
             local open_paren = line:find('%(')
             if open_paren then
-                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.file_name or 'Directory', idx - 1, icon_end, open_paren - 1)
-                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.match_count or 'Number', idx - 1, open_paren - 1, -1)
+                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui,
+                    config.options.highlights.file_name or 'Directory', idx - 1, icon_end, open_paren - 1)
+                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui,
+                    config.options.highlights.match_count or 'Number', idx - 1, open_paren - 1, -1)
             end
         elseif meta.type == 'match' then
             local line = lines[idx] or ''
             local prefix_chars = vim.fn.strchars(meta.prefix or '')
             local prefix_end = prefix_chars > 0 and safe_byteindex(line, prefix_chars) or 0
             if prefix_end > 0 then
-                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.line_number or 'LineNr', idx - 1, 0, prefix_end)
+                vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui,
+                    config.options.highlights.line_number or 'LineNr', idx - 1, 0, prefix_end)
             end
 
             local highlight_start = math.max(0, math.floor(meta.highlight_start or 0))
@@ -729,9 +739,11 @@ function M.apply_result_highlights()
                 end_byte = math.min(#line, start_byte + highlight_length)
             end
 
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.match or 'Search', idx - 1, start_byte, end_byte)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.match or 'Search', idx - 1,
+                start_byte, end_byte)
         elseif meta.type == 'help' then
-            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.help_text or 'Comment', idx - 1, 0, -1)
+            vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_ui, config.options.highlights.help_text or 'Comment',
+                idx - 1, 0, -1)
         end
     end
 end
@@ -752,7 +764,7 @@ function M.ensure_resize_autocmd()
             local new_width = M.get_sidebar_width()
             if state.last_sidebar_width ~= new_width then
                 state.last_sidebar_width = new_width
-        vim.schedule(M.render_content)
+                vim.schedule(M.render_content)
             end
         end,
     })
