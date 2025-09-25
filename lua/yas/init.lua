@@ -3,6 +3,7 @@ local M = {}
 local config = require('yas.config')
 local window = require('yas.window')
 local search = require('yas.search')
+local highlight = require('yas.highlight')
 
 -- Open the finder
 function M.open()
@@ -44,6 +45,7 @@ end
 -- Setup function for user configuration
 function M.setup(opts)
     config.setup(opts or {})
+    highlight.setup_highlights()
 end
 
 return M

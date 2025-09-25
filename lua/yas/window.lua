@@ -1,4 +1,5 @@
 local config = require('yas.config')
+local highlight = require('yas.highlight')
 
 local M = {}
 
@@ -220,6 +221,9 @@ end
 -- Close the window
 function M.close()
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+        -- Clear all highlights before closing
+        highlight.clear_all_highlights()
+        
         -- Switch to the sidebar window before closing to avoid issues
         local current_win = vim.api.nvim_get_current_win()
         vim.api.nvim_set_current_win(state.winnr)
@@ -659,6 +663,8 @@ function M.perform_search_and_update()
                 if results then
                     state.results = results
                     M.render_content()
+                    -- Highlight search results in open buffers
+                    highlight.highlight_search_results(results, state.search_query)
                 else
                     vim.notify('Search returned no results', vim.log.levels.WARN)
                 end
@@ -697,7 +703,7 @@ function M.select_result()
     local entry = state.line_index[line]
     if not entry then return end
 
-    local function open_location(filepath, lnum, col)
+    local function open_location(filepath, lnum, col, length)
         local fname = vim.fn.fnamemodify(filepath, ':p')
 
         -- Choose a target window (prefer previous window)
@@ -717,6 +723,12 @@ function M.select_result()
         vim.cmd('edit ' .. vim.fn.fnameescape(fname))
         pcall(vim.api.nvim_win_set_cursor, target_win, { lnum, math.max(0, col or 0) })
         vim.cmd('normal! zvzz')
+        
+        -- Highlight the focused match using our highlight module
+        if length then
+            local bufnr = vim.fn.bufnr('%')
+            highlight.highlight_focus(bufnr, lnum, col, length)
+        end
     end
 
     if entry.type == 'match' then
@@ -724,14 +736,15 @@ function M.select_result()
         if not file_result then return end
         local match = file_result.matches[entry.match_index]
         if not match then return end
-        open_location(file_result.file, match.line_number, match.column)
+        open_location(file_result.file, match.line_number, match.column, match.length)
     elseif entry.type == 'file' then
         local file_result = state.results[entry.file_index]
         if not file_result then return end
         local first = file_result.matches[1]
         local line_number = first and first.line_number or 1
         local col = first and first.column or 0
-        open_location(file_result.file, line_number, col)
+        local length = first and first.length or 1
+        open_location(file_result.file, line_number, col, length)
     end
 end
 

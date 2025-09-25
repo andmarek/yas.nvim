@@ -80,7 +80,7 @@ function M.search_with_ripgrep(query, callback)
                 end
 
                 if #filtered_data > 0 then
-                    local parse_ok, results = pcall(M.parse_ripgrep_output, filtered_data)
+                    local parse_ok, results = pcall(M.parse_ripgrep_output, filtered_data, query)
                     if parse_ok then
                         callback(results or {})
                     else
@@ -124,8 +124,9 @@ function M.search_with_ripgrep(query, callback)
 end
 
 -- Parse ripgrep JSON output
-function M.parse_ripgrep_output(data)
+function M.parse_ripgrep_output(data, query)
     local results_map = {}
+    query = query or ''
 
     for _, line in ipairs(data) do
         if line and line ~= '' then
