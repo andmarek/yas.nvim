@@ -147,11 +147,15 @@ function M.render_results(search_query, results, collapsed_files, sidebar_width,
     return lines, idx_map
 end
 
--- Main render function that combines all sections
+-- Main render function that combines all sections  
 function M.render_content(state, sidebar_width, trim_match_preview_fn)
-    local lines, idx_map = M.render_header(state.search_query, sidebar_width)
+    -- Get current query from search engine
+    local search_engine = require('yas.search_engine')
+    local current_query = search_engine.current_query()
+    
+    local lines, idx_map = M.render_header(current_query, sidebar_width)
 
-    if state.search_query == '' then
+    if current_query == '' then
         local help_lines, help_idx_map = M.render_help()
         for _, line in ipairs(help_lines) do
             table.insert(lines, line)
@@ -161,7 +165,7 @@ function M.render_content(state, sidebar_width, trim_match_preview_fn)
         end
     else
         local result_lines, result_idx_map = M.render_results(
-            state.search_query, 
+            current_query, 
             state.results, 
             state.collapsed_files, 
             sidebar_width, 

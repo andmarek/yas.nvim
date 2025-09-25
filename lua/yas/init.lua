@@ -2,7 +2,7 @@ local M = {}
 
 local config = require('yas.config')
 local window = require('yas.window')
-local search = require('yas.search')
+--local search = require('yas.search')
 local highlight = require('yas.highlight')
 
 -- Open the finder

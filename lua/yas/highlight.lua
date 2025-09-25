@@ -13,6 +13,19 @@ local highlight_cache = {}
 -- Current search query for highlighting new buffers
 local current_query = ''
 
+-- Utility function to sanitize UTF-8 text (removes invalid bytes)
+local function sanitize_utf8(text)
+    if not text then return '' end
+    -- Replace invalid UTF-8 sequences with replacement character
+    local ok, _ = pcall(vim.fn.strchars, text)
+    if ok then 
+        return text 
+    else
+        -- If the text contains invalid UTF-8, replace problematic bytes
+        return text:gsub('[\128-\255]', '?')
+    end
+end
+
 -- Initialize highlight groups
 function M.setup_highlights()
     -- Define default highlight groups
@@ -48,7 +61,23 @@ function M.highlight_all(bufnr, matches)
     end
     
     -- Check if highlights changed to avoid unnecessary updates
-    local cache_key = vim.fn.json_encode(matches)
+    -- Create a safe cache key without potentially invalid UTF-8 text
+    local safe_matches = {}
+    for i, match in ipairs(matches) do
+        table.insert(safe_matches, {
+            line_number = match.line_number,
+            column = match.column,
+            length = match.length
+            -- Exclude 'text' field which may contain invalid UTF-8
+        })
+    end
+    
+    local cache_key_ok, cache_key = pcall(vim.fn.json_encode, safe_matches)
+    if not cache_key_ok then
+        -- Fallback to a simple hash if json encoding still fails
+        cache_key = string.format('%s_%d', bufnr, #matches)
+    end
+    
     if highlight_cache[bufnr] == cache_key then
         return
     end
@@ -185,7 +214,7 @@ function M.highlight_all_occurrences_in_buffer(bufnr, query)
                     line_number = line_num,
                     column = char_start,
                     length = char_length,
-                    text = line_text
+                    text = sanitize_utf8(line_text)
                 })
                 
                 col = end_pos + 1

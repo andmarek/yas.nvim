@@ -1,6 +1,7 @@
 local config = require('yas.config')
 local highlight = require('yas.highlight')
 local render = require('yas.render')
+local search_engine = require('yas.search_engine')
 
 local M = {}
 
@@ -8,10 +9,8 @@ local state = {
     bufnr = nil,
     winnr = nil,
     prev_winnr = nil,
-    search_query = '',
     search_mode = false, -- Whether we're in search input mode
     results = {},      -- Current search results
-    search_timer = nil, -- Timer for debounced search
     line_index = {},    -- Map buffer line -> result entry {type, file_index, match_index}
     ns = nil,           -- Highlight namespace for selection
     ns_ui = nil,        -- Highlight namespace for UI accents
@@ -49,7 +48,8 @@ local function compute_cursor_col()
     local prompt_bytes = bytes_of_chars(prompt, prompt_chars)
     local sidebar_width = M.get_sidebar_width()
     local max_chars = math.max(0, sidebar_width - 4)
-    local display = truncated_display(state.search_query, max_chars)
+    local current_query = search_engine.current_query()
+    local display = truncated_display(current_query, max_chars)
     local display_bytes = bytes_of_chars(display, char_count(display))
     return prompt_bytes + display_bytes
 end
@@ -68,6 +68,7 @@ function M.get_sidebar_width()
 end
 
 -- Trims the match preview to fit within the sidebar width
+-- This supports resizing the sidebar width so that it's actually nice
 function M.trim_match_preview(text, sidebar_width, prefix, column, length)
     prefix = prefix or ''
     sidebar_width = sidebar_width or M.get_sidebar_width()
@@ -211,6 +212,9 @@ end
 -- Close the window
 function M.close()
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+        -- Stop any running searches
+        search_engine.stop()
+        
         -- Clear all highlights before closing
         highlight.clear_all_highlights()
         
@@ -262,21 +266,21 @@ end
 -- Setup insert mode keymaps for seamless text input
 function M.setup_insert_mode_keymaps(bufnr)
     local function commit_change(new_query)
-        state.search_query = new_query
         -- Defer rendering to avoid "not allowed to change text" error during expr evaluation
         vim.schedule(function()
             M.render_content()
-            M.perform_search_and_update()
+            M.perform_search_and_update(new_query)
         end)
     end
 
     -- Backspace
     vim.keymap.set('i', '<BS>', function()
         if not state.search_mode then return '<BS>' end
-        local chars = char_count(state.search_query)
+        local current_query = search_engine.current_query()
+        local chars = char_count(current_query)
         if chars > 0 then
             -- remove last character by chars, not bytes
-            local newq = vim.fn.strcharpart(state.search_query, 0, chars - 1)
+            local newq = vim.fn.strcharpart(current_query, 0, chars - 1)
             commit_change(newq)
         end
         return '' -- do not insert/delete in buffer
@@ -285,7 +289,8 @@ function M.setup_insert_mode_keymaps(bufnr)
     -- Space
     vim.keymap.set('i', '<Space>', function()
         if not state.search_mode then return ' ' end
-        commit_change(state.search_query .. ' ')
+        local current_query = search_engine.current_query()
+        commit_change(current_query .. ' ')
         return ''
     end, { buffer = bufnr, expr = true, silent = true })
 
@@ -295,7 +300,8 @@ function M.setup_insert_mode_keymaps(bufnr)
         if key ~= ' ' then -- Space handled above
             vim.keymap.set('i', key, function()
                 if not state.search_mode then return key end
-                commit_change(state.search_query .. key)
+                local current_query = search_engine.current_query()
+                commit_change(current_query .. key)
                 return ''
             end, { buffer = bufnr, expr = true, silent = true })
         end
@@ -508,79 +514,40 @@ end
 -- Handle character input during search
 function M.handle_char_input(char)
     if not state.search_mode then return end
+    
+    local current_query = search_engine.current_query()
 
     if char == '\b' or char == '\127' then -- Backspace
-        if #state.search_query > 0 then
-            state.search_query = state.search_query:sub(1, -2)
+        if #current_query > 0 then
+            local new_query = current_query:sub(1, -2)
             -- Immediate UI update, then search
             M.render_content()
-            M.perform_search_and_update()
+            M.perform_search_and_update(new_query)
         end
     elseif char:match('[%w%s%p]') then -- Printable characters
-        state.search_query = state.search_query .. char
+        local new_query = current_query .. char
         -- Immediate UI update, then search
         M.render_content()
-        M.perform_search_and_update()
+        M.perform_search_and_update(new_query)
     end
 end
 
 -- Perform search and update display (with debouncing)
-function M.perform_search_and_update()
-    -- Cancel previous timer if it exists
-    if state.search_timer then
-        if not state.search_timer:is_closing() then
-            state.search_timer:stop()
-            state.search_timer:close()
-        end
-        state.search_timer = nil
-    end
-
-    if state.search_query == '' then
-        state.results = {}
+function M.perform_search_and_update(query)
+    search_engine.request(query or '', function(results)
+        state.results = results or {}
         M.render_content()
-        return
-    end
-
-    -- Debounce search by 100ms (much faster)
-    state.search_timer = vim.loop.new_timer()
-    state.search_timer:start(100, 0, vim.schedule_wrap(function()
-        local ok, search = pcall(require, 'yas.search')
-        if not ok then
-            vim.notify('Error loading search module: ' .. search, vim.log.levels.ERROR)
-            return
-        end
-
-        local search_ok, search_err = pcall(function()
-            search.perform_search(state.search_query, function(results)
-                if results then
-                    state.results = results
-                    M.render_content()
-                    -- Highlight search results in open buffers
-                    highlight.highlight_search_results(results, state.search_query)
-                else
-                    vim.notify('Search returned no results', vim.log.levels.WARN)
-                end
-            end)
-        end)
-
-        if not search_ok then
-            vim.notify('Search error: ' .. tostring(search_err), vim.log.levels.ERROR)
-            state.results = {}
-            M.render_content()
-        end
-
-        if state.search_timer and not state.search_timer:is_closing() then
-            state.search_timer:close()
-            state.search_timer = nil
-        end
-    end))
+        -- Highlight search results in open buffers
+        highlight.highlight_search_results(state.results, query or '')
+    end)
 end
 
 -- Clear search
 function M.clear_search()
-    state.search_query = ''
+    search_engine.stop()
     state.results = {}
     state.search_mode = false
+    M.perform_search_and_update('') -- This will clear the search_engine's state too
     M.render_content()
 end
 
