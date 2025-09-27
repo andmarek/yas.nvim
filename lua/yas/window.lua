@@ -218,6 +218,9 @@ function M.close()
         -- Clear all highlights before closing
         highlight.clear_all_highlights()
 
+        -- Clear any autocmd groups associated with this sidebar
+        M.clear_sidebar_autocmds()
+
         -- Switch to the sidebar window before closing to avoid issues
         local current_win = vim.api.nvim_get_current_win()
         vim.api.nvim_set_current_win(state.winnr)
@@ -644,6 +647,15 @@ do
             end,
         })
     end
+
+    -- Clear the cursor highlight autocmd group for this buffer
+    function M.clear_cursor_highlight_autocmd()
+        if not state.bufnr then return end
+        local name = 'yas-finder-cursor-' .. state.bufnr
+        -- Reset sentinel so a new group can be created after reopen
+        group = nil
+        pcall(vim.api.nvim_del_augroup_by_name, name)
+    end
 end
 
 -- Toggle file expand/collapse
@@ -795,6 +807,28 @@ function M.ensure_resize_autocmd()
             end
         end,
     })
+end
+
+-- Clear resize-related autocmds
+function M.clear_resize_autocmd()
+    if state.resize_group then
+        pcall(vim.api.nvim_del_augroup_by_id, state.resize_group)
+        state.resize_group = nil
+    end
+end
+
+-- Clear search-mode autocmd group tied to this buffer
+function M.clear_search_autocmd()
+    if not state.bufnr then return end
+    local name = 'yas-search-' .. state.bufnr
+    pcall(vim.api.nvim_del_augroup_by_name, name)
+end
+
+-- Clear all sidebar autocmd groups
+function M.clear_sidebar_autocmds()
+    M.clear_cursor_highlight_autocmd()
+    M.clear_resize_autocmd()
+    M.clear_search_autocmd()
 end
 
 -- Remove result
