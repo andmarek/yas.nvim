@@ -133,22 +133,28 @@ end
 -- Setup minimal keymaps for the floating input window (Vim editing is now native)
 function M.setup_input_keymaps(bufnr)
     local opts = { noremap = true, silent = true, buffer = bufnr }
+    local keymaps = config.options.keymaps
 
-    -- Core actions
+    -- Close YAS
     vim.keymap.set({ 'n', 'i' }, '<Esc>', function()
         require('yas').close()
     end, opts)
 
-    vim.keymap.set({ 'n', 'i' }, '<CR>', function()
-        M.open_selected_result()
+    -- Switch to results pane (don't open file)
+    vim.keymap.set({ 'n', 'i' }, keymaps.focus_results or '<CR>', function()
+        M.focus_results()
     end, opts)
 
-    -- Navigation between panes
-    vim.keymap.set({ 'n', 'i' }, '<C-n>', function()
-        if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-            vim.api.nvim_set_current_win(state.winnr)
+    -- Alternative close binding
+    if keymaps.close then
+        local close_key = keymaps.close
+        if close_key:match('<leader>') then
+            close_key = close_key:gsub('<leader>', vim.g.mapleader or '\\')
         end
-    end, opts)
+        vim.keymap.set({ 'n', 'i' }, close_key, function()
+            require('yas').close()
+        end, opts)
+    end
 
     -- Scroll results while staying in input
     vim.keymap.set('n', '<C-j>', function()
@@ -534,137 +540,76 @@ function M.setup_insert_mode_keymaps(bufnr)
     end
 end
 
--- Setup buffer keymaps
+-- Setup enhanced buffer keymaps for results window
 function M.setup_buffer_keymaps(bufnr)
     local opts = { noremap = true, silent = true, buffer = bufnr }
     local keymaps = config.options.keymaps
 
-    -- 'q' always quits
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', 'q', '', {
-        callback = function()
-            require('yas').close()
-        end,
-        noremap = true,
-        silent = true
-    })
+    -- Core actions
+    vim.keymap.set('n', keymaps.select or '<CR>', function()
+        M.select_result()
+    end, opts)
 
-    -- Select result or exit search mode
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', '<CR>', '', {
-        callback = function()
-            if state.search_mode then
-                M.stop_search()
-            else
-                M.select_result()
-            end
-        end,
-        noremap = true,
-        silent = true
-    })
-
-    -- Toggle file expand/collapse
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', keymaps.toggle_file or 'za', '', {
-        callback = function()
-            if not state.search_mode then
-                M.toggle_file()
-            end
-        end,
-        noremap = true,
-        silent = true
-    })
-
-    -- Escape to exit search mode (primary way to exit)
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', '<Esc>', '', {
-        callback = function()
-            if state.search_mode then
-                M.stop_search()
-            end
-        end,
-        noremap = true,
-        silent = true
-    })
-
-    -- Clear search entirely
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', '<C-c>', '', {
-        callback = function()
-            M.clear_search()
-        end,
-        noremap = true,
-        silent = true
-    })
-
-    -- Special handling for 'i' to enter insert mode properly
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', 'i', '', {
-        callback = function()
-            M.start_search()
-        end,
-        noremap = true,
-        silent = true
-    })
-
-    -- Start search mode with other printable characters (but not 'i' or 'q')
-    local function setup_char_maps()
-        -- All printable characters except 'i' and 'q'
-        local chars = 'abcdefghjklmnoprstuvwxyzABCDEFGHJKLMNOPRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?`~'
-        for i = 1, #chars do
-            local char = chars:sub(i, i)
-            vim.api.nvim_buf_set_keymap(bufnr, 'n', char, '', {
-                callback = function()
-                    if not state.search_mode then
-                        M.start_search()
-                    end
-                    M.handle_char_input(char)
-                end,
-                noremap = true,
-                silent = true
-            })
-        end
-
-        -- Space
-        vim.api.nvim_buf_set_keymap(bufnr, 'n', '<Space>', '', {
-            callback = function()
-                if not state.search_mode then
-                    M.start_search()
-                end
-                M.handle_char_input(' ')
-            end,
-            noremap = true,
-            silent = true
-        })
-
-        -- Backspace
-        vim.api.nvim_buf_set_keymap(bufnr, 'n', '<BS>', '', {
-            callback = function()
-                if state.search_mode then
-                    M.handle_char_input('\b')
-                end
-            end,
-            noremap = true,
-            silent = true
-        })
+    -- Close with configurable key (resolve <leader> if needed)
+    local close_key = keymaps.close or '<leader>q'
+    if close_key:match('<leader>') then
+        close_key = close_key:gsub('<leader>', vim.g.mapleader or '\\')
     end
+    vim.keymap.set('n', close_key, function()
+        require('yas').close()
+    end, opts)
 
-    setup_char_maps()
+    -- Enhanced result opening modes
+    vim.keymap.set('n', 'o', function()
+        M.select_result('split')
+    end, opts)
 
-    -- Navigation keys when not in search mode
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', 'j', '', {
-        callback = function()
-            if not state.search_mode then
-                vim.cmd('normal! j')
-            end
-        end,
-        noremap = true,
-        silent = true
-    })
+    vim.keymap.set('n', 'v', function()
+        M.select_result('vsplit')  
+    end, opts)
 
-    vim.api.nvim_buf_set_keymap(bufnr, 'n', 'k', '', {
-        callback = function()
-            if not state.search_mode then
-                vim.cmd('normal! k')
-            end
-        end,
-        noremap = true,
-        silent = true
-    })
+    vim.keymap.set('n', 't', function()
+        M.select_result('tab')
+    end, opts)
+
+    -- Directory navigation (configurable)
+    vim.keymap.set('n', keymaps.directory_next or '<C-n>', function()
+        M.jump_to_next_file()
+    end, opts)
+
+    vim.keymap.set('n', keymaps.directory_prev or '<C-p>', function()
+        M.jump_to_prev_file()
+    end, opts)
+
+    -- Smart fold toggle (configurable)
+    vim.keymap.set('n', keymaps.fold_current or 'h', function()
+        M.toggle_current_file()
+    end, opts)
+
+    -- Expand (opposite of fold)
+    vim.keymap.set('n', 'l', function()
+        M.expand_current_file()
+    end, opts)
+
+    -- Legacy za binding for fold users
+    vim.keymap.set('n', keymaps.toggle_file or 'za', function()
+        M.toggle_file()
+    end, opts)
+
+    -- Return to search input (configurable)
+    vim.keymap.set('n', keymaps.back_to_insert or 'i', function()
+        M.focus_input()
+    end, opts)
+
+    -- Clear search
+    vim.keymap.set('n', keymaps.clear_search or '<C-c>', function()
+        M.clear_search()
+    end, opts)
+
+    -- Legacy close binding (fallback)
+    vim.keymap.set('n', 'q', function()
+        require('yas').close()
+    end, opts)
 end
 
 -- Render initial content
@@ -790,8 +735,8 @@ function M.clear_search()
     M.render_content()
 end
 
--- Select current result
-function M.select_result()
+-- Select current result with different open modes
+function M.select_result(mode)
     if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
         return
     end
@@ -801,21 +746,38 @@ function M.select_result()
     local entry = state.line_index[line]
     if not entry then return end
 
-    local function open_location(filepath, lnum, col, length)
+    local function open_location(filepath, lnum, col, length, open_mode)
         local fname = vim.fn.fnamemodify(filepath, ':p')
+        open_mode = open_mode or 'current'
 
-        -- Choose a target window (prefer previous window)
-        local target_win = state.prev_winnr
-        if not target_win or not vim.api.nvim_win_is_valid(target_win) or target_win == state.winnr then
-            -- Try go to previous window; if still the sidebar, create a split
-            vim.cmd('wincmd p')
+        local target_win
+        
+        if open_mode == 'split' then
+            -- Open in horizontal split
+            vim.cmd('split')
             target_win = vim.api.nvim_get_current_win()
-            if target_win == state.winnr then
-                vim.cmd('vsplit')
-                target_win = vim.api.nvim_get_current_win()
-            end
+        elseif open_mode == 'vsplit' then
+            -- Open in vertical split
+            vim.cmd('vsplit')  
+            target_win = vim.api.nvim_get_current_win()
+        elseif open_mode == 'tab' then
+            -- Open in new tab
+            vim.cmd('tabnew')
+            target_win = vim.api.nvim_get_current_win()
         else
-            vim.api.nvim_set_current_win(target_win)
+            -- Default: use existing window or create split
+            target_win = state.prev_winnr
+            if not target_win or not vim.api.nvim_win_is_valid(target_win) or target_win == state.winnr then
+                -- Try go to previous window; if still the sidebar, create a split
+                vim.cmd('wincmd p')
+                target_win = vim.api.nvim_get_current_win()
+                if target_win == state.winnr then
+                    vim.cmd('vsplit')
+                    target_win = vim.api.nvim_get_current_win()
+                end
+            else
+                vim.api.nvim_set_current_win(target_win)
+            end
         end
 
         vim.cmd('edit ' .. vim.fn.fnameescape(fname))
@@ -834,7 +796,7 @@ function M.select_result()
         if not file_result then return end
         local match = file_result.matches[entry.match_index]
         if not match then return end
-        open_location(file_result.file, match.line_number, match.column, match.length)
+        open_location(file_result.file, match.line_number, match.column, match.length, mode)
     elseif entry.type == 'file' then
         local file_result = state.results[entry.file_index]
         if not file_result then return end
@@ -842,7 +804,225 @@ function M.select_result()
         local line_number = first and first.line_number or 1
         local col = first and first.column or 0
         local length = first and first.length or 1
-        open_location(file_result.file, line_number, col, length)
+        open_location(file_result.file, line_number, col, length, mode)
+    end
+end
+
+-- Jump to next file section
+function M.jump_to_next_file()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local current_line = cursor[1]
+
+    -- Find next file entry after current line
+    for line_num = current_line + 1, vim.api.nvim_buf_line_count(state.bufnr) do
+        local entry = state.line_index[line_num]
+        if entry and entry.type == 'file' then
+            vim.api.nvim_win_set_cursor(state.winnr, { line_num, 0 })
+            M.update_selection_highlight()
+            return
+        end
+    end
+
+    -- If no file found after current line, wrap to beginning
+    for line_num = 1, current_line - 1 do
+        local entry = state.line_index[line_num]
+        if entry and entry.type == 'file' then
+            vim.api.nvim_win_set_cursor(state.winnr, { line_num, 0 })
+            M.update_selection_highlight()
+            return
+        end
+    end
+end
+
+-- Jump to previous file section
+function M.jump_to_prev_file()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local current_line = cursor[1]
+
+    -- Find previous file entry before current line
+    for line_num = current_line - 1, 1, -1 do
+        local entry = state.line_index[line_num]
+        if entry and entry.type == 'file' then
+            vim.api.nvim_win_set_cursor(state.winnr, { line_num, 0 })
+            M.update_selection_highlight()
+            return
+        end
+    end
+
+    -- If no file found before current line, wrap to end
+    for line_num = vim.api.nvim_buf_line_count(state.bufnr), current_line + 1, -1 do
+        local entry = state.line_index[line_num]
+        if entry and entry.type == 'file' then
+            vim.api.nvim_win_set_cursor(state.winnr, { line_num, 0 })
+            M.update_selection_highlight()
+            return
+        end
+    end
+end
+
+-- Focus the input window
+function M.focus_input()
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        vim.api.nvim_set_current_win(state.input_winnr)
+        -- Use schedule to ensure window focus happens before entering insert mode
+        vim.schedule(function()
+            if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) and 
+               vim.api.nvim_get_current_win() == state.input_winnr then
+                vim.cmd('startinsert!')
+            end
+        end)
+    else
+        -- If input window doesn't exist, start search mode  
+        M.start_search()
+    end
+end
+
+-- Focus the results window (switch from input to results)
+function M.focus_results()
+    if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+        vim.api.nvim_set_current_win(state.winnr)
+        
+        -- Exit insert mode if we're in it
+        if vim.fn.mode() == 'i' or vim.fn.mode() == 'I' then
+            vim.cmd('stopinsert')
+        end
+        
+        -- Position cursor on first occurrence/match (prefer matches over file headers)
+        local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+        local entry = state.line_index[cursor[1]]
+        if not entry or (entry.type ~= 'match' and entry.type ~= 'file') then
+            -- Find first match occurrence, fallback to first file if no matches
+            local first_match_line = nil
+            local first_file_line = nil
+            
+            for line_num, idx_entry in pairs(state.line_index) do
+                if idx_entry.type == 'match' and not first_match_line then
+                    first_match_line = line_num
+                elseif idx_entry.type == 'file' and not first_file_line then
+                    first_file_line = line_num
+                end
+            end
+            
+            -- Prefer first match over first file
+            local target_line = first_match_line or first_file_line
+            if target_line then
+                vim.api.nvim_win_set_cursor(state.winnr, { target_line, 0 })
+            end
+        end
+        M.update_selection_highlight()
+    end
+end
+
+-- Collapse current file section
+function M.collapse_current_file()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+
+    -- If we're on a match, find its parent file
+    if entry and entry.type == 'match' then
+        -- Find the file entry for this match
+        for check_line = line, 1, -1 do
+            local check_entry = state.line_index[check_line]
+            if check_entry and check_entry.type == 'file' and check_entry.file_index == entry.file_index then
+                entry = check_entry
+                line = check_line
+                break
+            end
+        end
+    end
+
+    if entry and entry.type == 'file' then
+        local file_result = state.results[entry.file_index]
+        if file_result then
+            state.collapsed_files[file_result.file] = true
+            M.render_content()
+            -- Keep cursor on the file line
+            vim.api.nvim_win_set_cursor(state.winnr, { line, 0 })
+        end
+    end
+end
+
+-- Expand current file section
+function M.expand_current_file()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+
+    -- If we're on a match, find its parent file
+    if entry and entry.type == 'match' then
+        -- Find the file entry for this match
+        for check_line = line, 1, -1 do
+            local check_entry = state.line_index[check_line]
+            if check_entry and check_entry.type == 'file' and check_entry.file_index == entry.file_index then
+                entry = check_entry
+                line = check_line
+                break
+            end
+        end
+    end
+
+    if entry and entry.type == 'file' then
+        local file_result = state.results[entry.file_index]
+        if file_result then
+            state.collapsed_files[file_result.file] = false
+            M.render_content()
+            -- Keep cursor on the file line
+            vim.api.nvim_win_set_cursor(state.winnr, { line, 0 })
+        end
+    end
+end
+
+-- Smart toggle current file section (collapse if expanded, expand if collapsed)
+function M.toggle_current_file()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+
+    -- If we're on a match, find its parent file
+    if entry and entry.type == 'match' then
+        -- Find the file entry for this match
+        for check_line = line, 1, -1 do
+            local check_entry = state.line_index[check_line]
+            if check_entry and check_entry.type == 'file' and check_entry.file_index == entry.file_index then
+                entry = check_entry
+                line = check_line
+                break
+            end
+        end
+    end
+
+    if entry and entry.type == 'file' then
+        local file_result = state.results[entry.file_index]
+        if file_result then
+            local filename = file_result.file
+            -- Toggle: if collapsed, expand; if expanded, collapse
+            local is_currently_collapsed = state.collapsed_files[filename]
+            state.collapsed_files[filename] = not is_currently_collapsed
+            M.render_content()
+            -- Keep cursor on the file line
+            vim.api.nvim_win_set_cursor(state.winnr, { line, 0 })
+        end
     end
 end
 

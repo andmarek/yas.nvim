@@ -42,6 +42,36 @@ function M.focus()
     end
 end
 
+-- Focus input mode without opening/closing YAS
+function M.insert()
+    if window.is_open() then
+        window.focus_input()
+    else
+        -- If YAS is closed, this function doesn't open it
+        vim.notify("YAS finder is not open. Use :YasToggle to open it.", vim.log.levels.WARN)
+    end
+end
+
+-- Directory navigation functions
+function M.next_directory()
+    if window.is_open() then
+        window.jump_to_next_file()
+    end
+end
+
+function M.prev_directory()
+    if window.is_open() then
+        window.jump_to_prev_file()
+    end
+end
+
+-- Smart fold current directory
+function M.fold_current()
+    if window.is_open() then
+        window.collapse_current_file()
+    end
+end
+
 -- Setup function for user configuration
 function M.setup(opts)
     config.setup(opts or {})

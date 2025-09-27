@@ -39,11 +39,22 @@ M.defaults = {
 
     -- Keybindings within the finder window
     keymaps = {
-        close = 'q',
+        -- Core actions
+        close = '<leader>q',
         select = '<CR>',
+        
+        -- Navigation
+        directory_next = '<C-n>',
+        directory_prev = '<C-p>',
+        fold_current = 'h',
+        back_to_insert = 'i',
+        
+        -- Legacy/additional bindings
         toggle_file = 'za',
-        remove_result = 'dd',
         clear_search = '<C-c>',
+        
+        -- Input pane specific
+        focus_results = '<CR>',  -- From input to results
     }
 }
 
