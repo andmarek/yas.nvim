@@ -268,32 +268,17 @@ end
 
 -- Setup insert mode keymaps for seamless text input
 function M.setup_insert_mode_keymaps(bufnr)
-    local function commit_change(new_query)
-        -- Defer rendering to avoid "not allowed to change text" error during expr evaluation
-        vim.schedule(function()
-            M.render_content()
-            M.perform_search_and_update(new_query)
-        end)
-    end
-
     -- Backspace
     vim.keymap.set('i', '<BS>', function()
         if not state.search_mode then return '<BS>' end
-        local current_query = search_engine.current_query()
-        local chars = char_count(current_query)
-        if chars > 0 then
-            -- remove last character by chars, not bytes
-            local newq = vim.fn.strcharpart(current_query, 0, chars - 1)
-            commit_change(newq)
-        end
+        M.handle_char_input('\b')
         return '' -- do not insert/delete in buffer
     end, { buffer = bufnr, expr = true, silent = true })
 
     -- Space
     vim.keymap.set('i', '<Space>', function()
         if not state.search_mode then return ' ' end
-        local current_query = search_engine.current_query()
-        commit_change(current_query .. ' ')
+        M.handle_char_input(' ')
         return ''
     end, { buffer = bufnr, expr = true, silent = true })
 
@@ -303,8 +288,7 @@ function M.setup_insert_mode_keymaps(bufnr)
         if key ~= ' ' then -- Space handled above
             vim.keymap.set('i', key, function()
                 if not state.search_mode then return key end
-                local current_query = search_engine.current_query()
-                commit_change(current_query .. key)
+                M.handle_char_input(key)
                 return ''
             end, { buffer = bufnr, expr = true, silent = true })
         end
@@ -521,17 +505,25 @@ function M.handle_char_input(char)
     local current_query = search_engine.current_query()
 
     if char == '\b' or char == '\127' then -- Backspace
-        if #current_query > 0 then
-            local new_query = current_query:sub(1, -2)
-            -- Immediate UI update, then search
+        local chars = char_count(current_query)
+        if chars > 0 then
+            local new_query = vim.fn.strcharpart(current_query, 0, chars - 1)
+            -- Defer buffer edits; insert-mode expr maps cannot change text immediately
+            vim.schedule(function()
+                M.render_content()
+                M.perform_search_and_update(new_query)
+            end)
+        end
+        return
+    end
+
+    if type(char) == 'string' and #char > 0 and char:match('[%w%s%p]') then
+        local new_query = current_query .. char
+        -- Defer buffer edits; insert-mode expr maps cannot change text immediately
+        vim.schedule(function()
             M.render_content()
             M.perform_search_and_update(new_query)
-        end
-    elseif char:match('[%w%s%p]') then -- Printable characters
-        local new_query = current_query .. char
-        -- Immediate UI update, then search
-        M.render_content()
-        M.perform_search_and_update(new_query)
+        end)
     end
 end
 
