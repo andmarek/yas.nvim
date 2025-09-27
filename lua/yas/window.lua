@@ -8,6 +8,8 @@ local M = {}
 local state = {
     bufnr = nil,
     winnr = nil,
+    input_bufnr = nil,   -- Floating input window buffer
+    input_winnr = nil,   -- Floating input window
     prev_winnr = nil,
     search_mode = false, -- Whether we're in search input mode
     results = {},        -- Current search results
@@ -42,17 +44,7 @@ local function safe_byteindex(text, char_index)
     return (text and #text) or 0
 end
 
-local function compute_cursor_col()
-    local prompt = "> "
-    local prompt_chars = char_count(prompt)
-    local prompt_bytes = bytes_of_chars(prompt, prompt_chars)
-    local sidebar_width = M.get_sidebar_width()
-    local max_chars = math.max(0, sidebar_width - 4)
-    local current_query = search_engine.current_query()
-    local display = truncated_display(current_query, max_chars)
-    local display_bytes = bytes_of_chars(display, char_count(display))
-    return prompt_bytes + display_bytes
-end
+
 
 
 
@@ -65,6 +57,143 @@ function M.get_sidebar_width()
         end
     end
     return config.options.width or 40
+end
+
+-- Create or update the floating input window
+function M._create_input_window()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local sidebar_width = M.get_sidebar_width()
+    local input_width = math.max(1, sidebar_width - 2) -- Account for border
+
+    -- Create input buffer if needed
+    if not state.input_bufnr or not vim.api.nvim_buf_is_valid(state.input_bufnr) then
+        state.input_bufnr = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_set_option_value('buftype', 'nofile', { buf = state.input_bufnr })
+        vim.api.nvim_set_option_value('swapfile', false, { buf = state.input_bufnr })
+        vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = state.input_bufnr })
+        vim.api.nvim_set_option_value('buflisted', false, { buf = state.input_bufnr })
+        vim.api.nvim_set_option_value('filetype', 'yas-input', { buf = state.input_bufnr })
+        vim.api.nvim_buf_set_name(state.input_bufnr, 'YAS Input')
+
+        -- Set up input keymaps and autocmds
+        M.setup_input_keymaps(state.input_bufnr)
+        M.attach_input_autocmds(state.input_bufnr)
+    end
+
+    -- Close existing input window if it exists
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        vim.api.nvim_win_close(state.input_winnr, true)
+    end
+
+    -- Create floating input window
+    local win_config = {
+        relative = 'win',
+        win = state.winnr,
+        row = 2,  -- Position it on the empty line (line 3, 0-indexed)
+        col = 0,
+        width = input_width,
+        height = 1,
+        style = 'minimal',
+        border = 'rounded',
+        focusable = true,
+        zindex = 100,
+        title = ' Search ',
+        title_pos = 'left'
+    }
+
+    state.input_winnr = vim.api.nvim_open_win(state.input_bufnr, true, win_config) -- true = enter window
+
+    -- Set window options
+    vim.api.nvim_win_set_option(state.input_winnr, 'winblend', 10)
+    vim.api.nvim_win_set_option(state.input_winnr, 'wrap', false)
+    vim.api.nvim_win_set_option(state.input_winnr, 'cursorline', false)
+    vim.api.nvim_win_set_option(state.input_winnr, 'signcolumn', 'no')
+
+    -- Set initial content with current query (buffer is now always modifiable)
+    local current_query = search_engine.current_query()
+    vim.api.nvim_set_option_value('modifiable', true, { buf = state.input_bufnr })
+    vim.api.nvim_buf_set_lines(state.input_bufnr, 0, -1, false, { current_query })
+    -- Keep buffer modifiable for real Vim editing
+    
+    -- Update placeholder
+    M.update_placeholder(current_query, false)
+    
+    -- Position cursor at end and enter insert mode
+    vim.schedule(function()
+        if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+            vim.api.nvim_win_set_cursor(state.input_winnr, { 1, vim.fn.strchars(current_query) })
+            vim.cmd('startinsert!')
+        end
+    end)
+end
+
+-- Setup minimal keymaps for the floating input window (Vim editing is now native)
+function M.setup_input_keymaps(bufnr)
+    local opts = { noremap = true, silent = true, buffer = bufnr }
+
+    -- Core actions
+    vim.keymap.set({ 'n', 'i' }, '<Esc>', function()
+        require('yas').close()
+    end, opts)
+
+    vim.keymap.set({ 'n', 'i' }, '<CR>', function()
+        M.open_selected_result()
+    end, opts)
+
+    -- Navigation between panes
+    vim.keymap.set({ 'n', 'i' }, '<C-n>', function()
+        if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+            vim.api.nvim_set_current_win(state.winnr)
+        end
+    end, opts)
+
+    -- Scroll results while staying in input
+    vim.keymap.set('n', '<C-j>', function()
+        if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+            vim.api.nvim_win_call(state.winnr, function() 
+                vim.cmd('normal! 5j') 
+                M.update_selection_highlight()
+            end)
+        end
+    end, opts)
+
+    vim.keymap.set('n', '<C-k>', function()
+        if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+            vim.api.nvim_win_call(state.winnr, function() 
+                vim.cmd('normal! 5k') 
+                M.update_selection_highlight()
+            end)
+        end
+    end, opts)
+end
+
+-- Open the currently selected result (used from input window)
+function M.open_selected_result()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+    
+    -- Get the current cursor position in the results window
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+    
+    if entry and (entry.type == 'match' or entry.type == 'file') then
+        M.select_result()
+    else
+        -- If no specific result is selected, try to find the first match
+        for lnum, idx_entry in pairs(state.line_index) do
+            if idx_entry.type == 'match' then
+                -- Position cursor on first match and select it
+                vim.api.nvim_win_set_cursor(state.winnr, { lnum, 0 })
+                M.select_result()
+                break
+            end
+        end
+    end
 end
 
 -- Trims the match preview to fit within the sidebar width
@@ -134,6 +263,107 @@ function M.trim_match_preview(text, sidebar_width, prefix, column, length)
     return snippet, highlight_start, highlight_len
 end
 
+-- Attach buffer change autocmds to enable real Vim editing
+function M.attach_input_autocmds(bufnr)
+    local group = vim.api.nvim_create_augroup('yas-input-changes', { clear = true })
+    
+    -- React to buffer content changes
+    vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+            local line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
+            -- Debug: uncomment next line to see when autocmds fire
+            -- print("TextChanged fired with content:", line)
+            M.perform_search_and_update(line)
+            M.update_placeholder(line)
+        end,
+    })
+    
+    -- Ensure single line (flatten multiple lines to single line)
+    vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+            local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            if #lines > 1 then
+                local txt = table.concat(lines, ' ')
+                vim.schedule(function()
+                    if vim.api.nvim_buf_is_valid(bufnr) then
+                        vim.api.nvim_set_option_value('modifiable', true, { buf = bufnr })
+                        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { txt })
+                        vim.api.nvim_set_option_value('modifiable', false, { buf = bufnr })
+                    end
+                end)
+            end
+        end,
+    })
+    
+    -- Update placeholder on insert enter/leave
+    vim.api.nvim_create_autocmd('InsertEnter', {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+            local line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
+            M.update_placeholder(line, true) -- true = in insert mode
+        end,
+    })
+    
+    vim.api.nvim_create_autocmd('InsertLeave', {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+            local line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
+            M.update_placeholder(line, false) -- false = not in insert mode
+        end,
+    })
+end
+
+-- Update placeholder and search icon based on current query
+function M.update_placeholder(query, in_insert_mode)
+    if not state.input_bufnr or not vim.api.nvim_buf_is_valid(state.input_bufnr) then
+        return
+    end
+
+    local ns_input = vim.api.nvim_create_namespace('yas-input-ui')
+    vim.api.nvim_buf_clear_namespace(state.input_bufnr, ns_input, 0, -1)
+    
+    if query == '' and not in_insert_mode then
+        -- Show placeholder only when not in insert mode and empty
+        vim.api.nvim_buf_set_extmark(state.input_bufnr, ns_input, 0, 0, {
+            virt_text = { { '󰱼 Search files...', 'Comment' } },
+            virt_text_pos = 'overlay',
+            hl_mode = 'combine'
+        })
+    elseif query ~= '' then
+        -- Show search icon when there's content
+        vim.api.nvim_buf_set_extmark(state.input_bufnr, ns_input, 0, 0, {
+            virt_text = { { '󰱼 ', 'Identifier' } },
+            virt_text_pos = 'inline',
+        })
+    end
+end
+
+-- Update the content of the floating input window (legacy function, kept for compatibility)
+function M.update_input_content(query)
+    if not state.input_bufnr or not vim.api.nvim_buf_is_valid(state.input_bufnr) then
+        return
+    end
+
+    vim.api.nvim_set_option_value('modifiable', true, { buf = state.input_bufnr })
+    vim.api.nvim_buf_set_lines(state.input_bufnr, 0, -1, false, { query })
+    vim.api.nvim_set_option_value('modifiable', false, { buf = state.input_bufnr })
+
+    M.update_placeholder(query)
+
+    -- Position cursor at end if window is focused
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        if vim.api.nvim_get_current_win() == state.input_winnr then
+            vim.api.nvim_win_set_cursor(state.input_winnr, { 1, vim.fn.strchars(query) })
+        end
+    end
+end
+
 -- Create the sidebar window
 function M.create_buffer()
     local opts = config.options
@@ -194,16 +424,19 @@ function M.create_buffer()
     M.ensure_resize_autocmd()
     state.last_sidebar_width = M.get_sidebar_width()
 
-    -- Start in search mode and focus the sidebar
+    -- Start in search mode and render content
     state.search_mode = true
     M.render_content()
-    vim.api.nvim_set_current_win(state.winnr)
-
-    -- Position cursor at end of search text and enter insert mode
+    
+    -- Create floating input window
+    M._create_input_window()
+    
+    -- Focus the input window and enter insert mode
     vim.schedule(function()
-        if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-            local cursor_col = compute_cursor_col()
-            vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+        if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+            vim.api.nvim_set_current_win(state.input_winnr)
+            local current_query = search_engine.current_query()
+            vim.api.nvim_win_set_cursor(state.input_winnr, { 1, vim.fn.strchars(current_query) })
             vim.cmd('startinsert')
         end
     end)
@@ -211,6 +444,12 @@ end
 
 -- Close the window
 function M.close()
+    -- Close floating input window first
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        vim.api.nvim_win_close(state.input_winnr, true)
+        state.input_winnr = nil
+    end
+
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         -- Stop any running searches
         search_engine.stop()
@@ -461,31 +700,24 @@ function M.render_content()
     M.update_selection_highlight()
     M.apply_result_highlights()
 
-    -- Position cursor on search line when in search mode (use vim.schedule to avoid timing issues)
-    if state.search_mode and state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-        vim.schedule(function()
-            if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-                -- Position cursor at the end of the search query
-                local cursor_col = compute_cursor_col()
-                vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
-            end
-        end)
-    end
+
 end
 
 -- Start search input mode
 function M.start_search()
     state.search_mode = true
     M.render_content()
+    
+    -- Create or update the floating input window
+    M._create_input_window()
 
-    -- Focus the sidebar window
-    if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-        vim.api.nvim_set_current_win(state.winnr)
-        -- Position cursor and enter insert mode
+    -- Focus the input window and enter insert mode
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        vim.api.nvim_set_current_win(state.input_winnr)
         vim.schedule(function()
-            if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
-                local cursor_col = compute_cursor_col()
-                vim.api.nvim_win_set_cursor(state.winnr, { 3, cursor_col })
+            if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+                local current_query = search_engine.current_query()
+                vim.api.nvim_win_set_cursor(state.input_winnr, { 1, vim.fn.strchars(current_query) })
                 vim.cmd('startinsert')
             end
         end)
@@ -495,6 +727,18 @@ end
 -- Stop search input mode
 function M.stop_search()
     state.search_mode = false
+    
+    -- Close the floating input window
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        vim.api.nvim_win_close(state.input_winnr, true)
+        state.input_winnr = nil
+    end
+    
+    -- Focus back to results window
+    if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
+        vim.api.nvim_set_current_win(state.winnr)
+    end
+    
     M.render_content()
 end
 
@@ -768,7 +1012,12 @@ function M.ensure_resize_autocmd()
             local new_width = M.get_sidebar_width()
             if state.last_sidebar_width ~= new_width then
                 state.last_sidebar_width = new_width
-                vim.schedule(M.render_content)
+                vim.schedule(function()
+                    M.render_content()
+                    if state.search_mode then
+                        M._create_input_window()
+                    end
+                end)
             end
         end,
     })
@@ -795,7 +1044,12 @@ function M.ensure_resize_autocmd()
             local new_width = M.get_sidebar_width()
             if state.last_sidebar_width ~= new_width then
                 state.last_sidebar_width = new_width
-                vim.schedule(M.render_content)
+                vim.schedule(function()
+                    M.render_content()
+                    if state.search_mode then
+                        M._create_input_window()
+                    end
+                end)
             end
         end,
     })
@@ -832,7 +1086,6 @@ end
 -- Expose internal state for testing (development only)
 if vim.g.yas_debug then
     M._get_state = function() return state end
-    M._compute_cursor_col = compute_cursor_col
 end
 
 return M

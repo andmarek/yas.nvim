@@ -9,7 +9,7 @@ local function truncated_display(query, max_chars)
     return vim.fn.strcharpart(query or "", 0, max_chars or 32)
 end
 
--- Render header section with title and search input
+-- Render header section with title (no inline input - we use floating window)
 function M.render_header(search_query, sidebar_width)
     local lines = {}
     local idx_map = {}
@@ -20,22 +20,12 @@ function M.render_header(search_query, sidebar_width)
     table.insert(lines, '  Search across files')
     table.insert(idx_map, { type = 'header' })
 
-    -- Search input line
-    local search_display = search_query
-    if search_display == '' then
-        search_display = '(type to search...)'
-    end
-
-    local display = truncated_display(search_display, math.max(0, sidebar_width - 4))
-    local display_width = vim.fn.strwidth(display)
-    local max_input_width = math.max(0, sidebar_width - 4)
-    local padded = display .. string.rep(' ', math.max(0, max_input_width - display_width))
-    table.insert(lines, '> ' .. padded)
-    table.insert(idx_map, { type = 'input', width = max_input_width })
+    -- Space for floating input window (this line will be covered by the floating window)
+    table.insert(lines, '') -- Empty line where floating input appears
+    table.insert(idx_map, { type = 'input_placeholder' })
+    
     table.insert(lines, make_divider(sidebar_width))
     table.insert(idx_map, { type = 'divider' })
-    table.insert(lines, '')
-    table.insert(idx_map, { type = 'blank' })
     table.insert(lines, '')
     table.insert(idx_map, { type = 'blank' })
 
