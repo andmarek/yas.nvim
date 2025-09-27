@@ -1,0 +1,15 @@
+This is a test file for demonstrating YAS highlighting.
+
+We have many test functions here:
+function test_one() {
+    return "test result";
+}
+
+function test_two() {
+    var test_var = "testing";
+    return test_var;
+}
+
+More test content to search for.
+The test should highlight ALL occurrences of the search term.
+Testing, tested, tests - all should be highlighted when searching for "test".

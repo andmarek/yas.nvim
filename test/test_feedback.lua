@@ -126,7 +126,8 @@ function M.dump_state()
         local winnr = vim.api.nvim_get_current_win()
         local row, col = unpack(vim.api.nvim_win_get_cursor(winnr))
         state.cursor = { row = row, col = col }
-        state.search_query = M.get_search_query()
+        local search_engine = require('yas.search_engine')
+        state.search_query = search_engine.current_query()
     end
     
     return state

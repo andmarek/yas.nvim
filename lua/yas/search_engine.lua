@@ -205,6 +205,7 @@ end
 ---Start (or restart) a debounced search
 ---@param query string The search query
 ---@param on_done function Callback when results are ready: function(results)
+---@return nil
 function M.request(query, on_done)
     if type(on_done) ~= 'function' then
         vim.notify('Search callback must be a function', vim.log.levels.ERROR)
@@ -224,7 +225,8 @@ function M.request(query, on_done)
         return
     end
 
-    -- Start debounced search
+    -- Debounce search to avoid excessive ripgrep processes when user is typing rapidly
+    -- This prevents performance issues 
     state.search_timer = vim.loop.new_timer()
     state.search_timer:start(DEFAULTS.DEBOUNCE_MS, 0, vim.schedule_wrap(function()
         -- Perform the actual search
