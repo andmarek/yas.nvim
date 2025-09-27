@@ -1,15 +1,13 @@
 # YAS.nvim - Yet Another Search Plugin
 
-A VSCode-like finder plugin for Neovim that provides a sidebar interface for searching text across files.
+A VSCode-like finder plugin for Neovim with smooth Vim-native navigation.
 
 ## Features
 
-- 🔍 Real-time search across all files in your project
-- 📁 Results organized by file with collapsible sections
-- 🎯 Click to navigate directly to matches with highlighting
-- ⚡ Fast search using ripgrep (with vim fallback)
-- 🗑️ Remove individual search results
-- ⚙️ Highly configurable
+-  **Real-time search** across all files in your project
+-  **File organization** with smart fold/unfold
+-  **Vim-native navigation** - j/k for results, Ctrl+n/p for directories
+- **Fast search** Ripgrep for fast searching 
 
 ## Installation
 
@@ -37,25 +35,47 @@ use {
 }
 ```
 
-## Usage
+## Quick Start
 
-### Commands
+```lua
+-- Toggle finder and start searching immediately  
+:YasToggle
 
-- `:YasOpen` - Open the finder sidebar
-- `:YasClose` - Close the finder sidebar  
-- `:YasToggle` - Toggle the finder sidebar
+-- Or use the API
+lua require('yas').toggle()
+```
 
-### Default Keybindings
+## Smooth Workflow
 
-- `<C-S-f>` - Toggle finder (global)
+1. **Search**: `:YasToggle` opens in insert mode - start typing immediately
+2. **Navigate**: `<CR>` switches to results, use `j/k` to navigate matches
+3. **Directories**: `<C-n>/<C-p>` to jump between files, `h` to fold/unfold
+4. **Open**: `<CR>` opens the selected result  
+5. **Return**: `i` goes back to search, `<leader>q` closes finder
 
-### Finder Keybindings
+## API Functions
 
-- `i` - Start search input
-- `<CR>` - Navigate to selected result
-- `za` - Toggle file expand/collapse
-- `dd` - Remove result from list
-- `q` - Close finder
+```lua
+require('yas').toggle()           -- Open/close finder
+require('yas').insert()           -- Focus search input
+require('yas').next_directory()   -- Jump to next file
+require('yas').prev_directory()   -- Jump to previous file  
+require('yas').fold_current()     -- Toggle fold current file
+```
+
+## Default Keybindings
+
+### Input Pane (Search)
+- `<CR>` - Switch to results (normal mode, first match)
+- `<leader>q` - Close finder
+
+### Results Pane (Navigation)
+- `<CR>` - Open selected result
+- `j/k` - Navigate between matches
+- `<C-n>/<C-p>` - Jump between files  
+- `h` - Toggle fold/unfold file
+- `i` - Return to search input
+- `<leader>q` - Close finder
 
 ## Configuration
 
@@ -87,13 +107,15 @@ require('yas').setup({
     context = 'Comment',
   },
   
-  -- Keybindings within the finder window
+  -- Customizable keybindings
   keymaps = {
-    close = 'q',
-    select = '<CR>',
-    toggle_file = 'za',
-    remove_result = 'dd',
-    clear_search = '<C-c>',
+    close = '<leader>q',           -- Close finder
+    select = '<CR>',               -- Open result  
+    directory_next = '<C-n>',      -- Next file
+    directory_prev = '<C-p>',      -- Previous file
+    fold_current = 'h',            -- Toggle fold
+    back_to_insert = 'i',          -- Return to search
+    focus_results = '<CR>',        -- Input -> results
   }
 })
 ```
@@ -102,20 +124,3 @@ require('yas').setup({
 
 - Neovim 0.7+
 - ripgrep (optional, for faster search)
-
-## Development Status
-
-This plugin is currently in early development. Core features implemented:
-
-- [x] Basic plugin structure
-- [x] Sidebar window management
-- [x] Search functionality with ripgrep/vim fallback
-- [x] Basic result display
-- [ ] Result navigation and highlighting
-- [ ] File collapsing/expanding
-- [ ] Result removal
-- [ ] Advanced highlighting and UI polish
-
-## License
-
-MIT
