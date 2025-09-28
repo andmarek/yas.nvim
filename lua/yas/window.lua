@@ -99,7 +99,7 @@ function M._create_input_window()
         style = 'minimal',
         border = 'rounded',
         focusable = true,
-        zindex = 100,
+        zindex = 10,  -- Lower z-index to avoid overlapping other plugins
         title = ' Search ',
         title_pos = 'left'
     }
@@ -154,12 +154,32 @@ function M._resize_input_window()
         style = 'minimal',
         border = 'rounded',
         focusable = true,
-        zindex = 100,
+        zindex = 10,  -- Lower z-index to avoid overlapping other plugins
         title = ' Search ',
         title_pos = 'left'
     }
     
     vim.api.nvim_win_set_config(state.input_winnr, win_config)
+end
+
+-- Temporarily hide input window (to prevent overlap with other plugins)
+function M.hide_input_window_temporarily()
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        -- Don't actually close the window, just hide it with zindex manipulation
+        -- or move it off-screen temporarily
+        local current_config = vim.api.nvim_win_get_config(state.input_winnr)
+        current_config.zindex = 1  -- Very low z-index
+        vim.api.nvim_win_set_config(state.input_winnr, current_config)
+    end
+end
+
+-- Show input window (restore from temporary hiding)
+function M.show_input_window()
+    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
+        local current_config = vim.api.nvim_win_get_config(state.input_winnr)
+        current_config.zindex = 10  -- Restore normal z-index
+        vim.api.nvim_win_set_config(state.input_winnr, current_config)
+    end
 end
 
 -- Setup minimal keymaps for the floating input window (Vim editing is now native)
@@ -315,6 +335,24 @@ function M.attach_input_autocmds(bufnr)
             -- print("TextChanged fired with content:", line)
             M.perform_search_and_update(line)
             M.update_placeholder(line)
+        end,
+    })
+    
+    -- Hide floating window when focus moves to non-YAS windows (prevents overlap)
+    local hide_group = vim.api.nvim_create_augroup('yas-window-focus', { clear = true })
+    vim.api.nvim_create_autocmd('WinEnter', {
+        group = hide_group,
+        callback = function()
+            local current_win = vim.api.nvim_get_current_win()
+            local current_buf = vim.api.nvim_win_get_buf(current_win)
+            local filetype = vim.api.nvim_get_option_value('filetype', { buf = current_buf })
+            
+            -- Hide if we're not in a YAS window
+            if not (filetype == 'yas-input' or filetype == 'yas-finder') then
+                M.hide_input_window_temporarily()
+            else
+                M.show_input_window()
+            end
         end,
     })
     
