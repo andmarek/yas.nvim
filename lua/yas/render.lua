@@ -23,7 +23,7 @@ function M.render_header(search_query, sidebar_width)
     -- Space for floating input window (this line will be covered by the floating window)
     table.insert(lines, '') -- Empty line where floating input appears
     table.insert(idx_map, { type = 'input_placeholder' })
-    
+
     table.insert(lines, make_divider(sidebar_width))
     table.insert(idx_map, { type = 'divider' })
     table.insert(lines, '')
@@ -97,17 +97,10 @@ function M.render_results(search_query, results, collapsed_files, sidebar_width,
     local idx_map = {}
 
     if #results == 0 then
-        table.insert(lines, string.format(' No results for "%s"', search_query))
+        table.insert(lines, ' No matches found')
         table.insert(idx_map, { type = 'empty' })
         return lines, idx_map
     end
-
-    table.insert(lines, string.format(' Results for "%s"', search_query))
-    table.insert(idx_map, { type = 'label' })
-    table.insert(lines, make_divider(sidebar_width))
-    table.insert(idx_map, { type = 'divider' })
-    table.insert(lines, '')
-    table.insert(idx_map, { type = 'blank' })
 
     for file_index, file_result in ipairs(results) do
         local clean_filename = file_result.file:gsub('[\r\n]', '')

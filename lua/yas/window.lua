@@ -701,15 +701,12 @@ function M.start_search()
     end
 end
 
--- Stop search input mode
+-- Stop search input mode (but keep query visible)
 function M.stop_search()
     state.search_mode = false
     
-    -- Close the floating input window
-    if state.input_winnr and vim.api.nvim_win_is_valid(state.input_winnr) then
-        vim.api.nvim_win_close(state.input_winnr, true)
-        state.input_winnr = nil
-    end
+    -- Keep the floating input window visible but unfocused
+    -- (Don't close it - user wants to see the query)
     
     -- Focus back to results window
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
@@ -917,7 +914,7 @@ function M.focus_input()
     end
 end
 
--- Focus the results window (switch from input to results)
+-- Focus the results window (switch from input to results, keep query visible)
 function M.focus_results()
     if state.winnr and vim.api.nvim_win_is_valid(state.winnr) then
         vim.api.nvim_set_current_win(state.winnr)
@@ -926,6 +923,9 @@ function M.focus_results()
         if vim.fn.mode() == 'i' or vim.fn.mode() == 'I' then
             vim.cmd('stopinsert')
         end
+        
+        -- Keep input window visible but unfocused
+        -- (Don't close it like the old behavior)
         
         -- Position cursor on first occurrence/match (prefer matches over file headers)
         local cursor = vim.api.nvim_win_get_cursor(state.winnr)
