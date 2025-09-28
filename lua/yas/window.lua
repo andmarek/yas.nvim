@@ -680,6 +680,11 @@ function M.setup_buffer_keymaps(bufnr)
     vim.keymap.set('n', 'q', function()
         require('yas').close()
     end, opts)
+
+    -- Mouse double-click support
+    vim.keymap.set('n', '<2-LeftMouse>', function()
+        M.handle_double_click()
+    end, opts)
 end
 
 -- Render initial content
@@ -1327,6 +1332,29 @@ end
 function M.remove_result()
     -- TODO: Implement result removal
     print('Remove result - TODO: implement')
+end
+
+-- Handle double-click events
+function M.handle_double_click()
+    if not state.winnr or not vim.api.nvim_win_is_valid(state.winnr) then
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(state.winnr)
+    local line = cursor[1]
+    local entry = state.line_index[line]
+    
+    if not entry then
+        return
+    end
+
+    if entry.type == 'match' then
+        -- Double click on a match occurrence -> jump to it (same as <CR>)
+        M.select_result()
+    elseif entry.type == 'file' then
+        -- Double click on a file header -> toggle expand/collapse
+        M.toggle_current_file()
+    end
 end
 
 -- Expose internal state for testing (development only)
