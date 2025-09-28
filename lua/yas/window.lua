@@ -130,6 +130,38 @@ function M._create_input_window()
     end)
 end
 
+-- Resize the floating input window to match sidebar width
+function M._resize_input_window()
+    if not state.input_winnr or not vim.api.nvim_win_is_valid(state.input_winnr) then
+        -- If window doesn't exist but we're in search mode, create it
+        if state.search_mode then
+            M._create_input_window()
+        end
+        return
+    end
+
+    local sidebar_width = M.get_sidebar_width()
+    local input_width = math.max(1, sidebar_width - 2) -- Account for border
+    
+    -- Update window configuration
+    local win_config = {
+        relative = 'win',
+        win = state.winnr,
+        row = 2,
+        col = 0,
+        width = input_width,
+        height = 1,
+        style = 'minimal',
+        border = 'rounded',
+        focusable = true,
+        zindex = 100,
+        title = ' Search ',
+        title_pos = 'left'
+    }
+    
+    vim.api.nvim_win_set_config(state.input_winnr, win_config)
+end
+
 -- Setup minimal keymaps for the floating input window (Vim editing is now native)
 function M.setup_input_keymaps(bufnr)
     local opts = { noremap = true, silent = true, buffer = bufnr }
@@ -1194,9 +1226,7 @@ function M.ensure_resize_autocmd()
                 state.last_sidebar_width = new_width
                 vim.schedule(function()
                     M.render_content()
-                    if state.search_mode then
-                        M._create_input_window()
-                    end
+                    M._resize_input_window()
                 end)
             end
         end,
@@ -1226,9 +1256,7 @@ function M.ensure_resize_autocmd()
                 state.last_sidebar_width = new_width
                 vim.schedule(function()
                     M.render_content()
-                    if state.search_mode then
-                        M._create_input_window()
-                    end
+                    M._resize_input_window()
                 end)
             end
         end,
