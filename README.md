@@ -9,6 +9,10 @@ A VSCode-like finder plugin for Neovim with smooth Vim-native navigation.
 -  **Vim-native navigation** - j/k for results, Ctrl+n/p for directories
 - **Fast search** Ripgrep for fast searching 
 
+## Screenshots
+
+![YAS.nvim screenshot](docs/yas_image.png)
+
 ## Installation
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
